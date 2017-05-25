@@ -13,6 +13,24 @@ public class PortForwardingStruct {
     private String guestMac;
     private PortForwardingRuleInventory rule;
     private boolean snatInboundTraffic;
+    private boolean releaseVmNicInfoWhenDetaching;
+    private boolean releaseVip;
+
+    public boolean isReleaseVip() {
+        return releaseVip;
+    }
+
+    public void setReleaseVip(boolean releaseVip) {
+        this.releaseVip = releaseVip;
+    }
+
+    public boolean isReleaseVmNicInfoWhenDetaching() {
+        return releaseVmNicInfoWhenDetaching;
+    }
+
+    public void setReleaseVmNicInfoWhenDetaching(boolean releaseVmNicInfoWhenDetaching) {
+        this.releaseVmNicInfoWhenDetaching = releaseVmNicInfoWhenDetaching;
+    }
 
     public boolean isSnatInboundTraffic() {
         return snatInboundTraffic;

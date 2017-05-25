@@ -23,6 +23,7 @@ import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
@@ -68,7 +69,7 @@ public class TestSnapshotOnKvm45 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -97,8 +98,8 @@ public class TestSnapshotOnKvm45 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
         BackupStorageInventory sftp = deployer.backupStorages.get("sftp");
         BackupStorageInventory sftp1 = deployer.backupStorages.get("sftp1");
         VmInstanceInventory vm = deployer.vms.get("TestVm");
@@ -116,6 +117,8 @@ public class TestSnapshotOnKvm45 {
         VolumeSnapshotInventory inv3 = api.createSnapshot(volUuid);
         deltaSnapshot(inv3, 3);
 
+        long size = SizeUnit.GIGABYTE.toByte(10);
+        nfsConfig.mergeSnapshotCmdSize.put(inv3.getVolumeUuid(), size);
         ImageInventory img = api.createTemplateFromSnapshot(inv3.getUuid(), Arrays.asList(sftp.getUuid(), sftp1.getUuid()));
         Assert.assertEquals(2, img.getBackupStorageRefs().size());
         List<String> bsUuids = CollectionUtils.transformToList(img.getBackupStorageRefs(), new Function<String, ImageBackupStorageRefInventory>() {

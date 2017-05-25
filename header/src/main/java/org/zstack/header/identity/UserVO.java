@@ -2,24 +2,18 @@ package org.zstack.header.identity;
 
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
+import org.zstack.header.vo.ResourceVO;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 import java.sql.Timestamp;
 
 @Entity
 @Table
-public class UserVO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class UserVO extends ResourceVO {
     @Column
     @ForeignKey(parentEntityClass = AccountVO.class, parentKey = "uuid", onDeleteAction = ReferenceOption.CASCADE)
     private String accountUuid;
-    
+
     @Column
     private String name;
 
@@ -28,18 +22,23 @@ public class UserVO {
 
     @Column
     private String password;
-    
+
     @Column
     private String securityKey;
-    
+
     @Column
     private String token;
-    
+
     @Column
     private Timestamp createDate;
-    
+
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public String getDescription() {
         return description;
@@ -47,14 +46,6 @@ public class UserVO {
 
     public void setDescription(String description) {
         this.description = description;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getName() {

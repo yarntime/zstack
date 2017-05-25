@@ -2,6 +2,10 @@ package org.zstack.network.securitygroup;
 
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
+import java.sql.Timestamp;
+
 /**
  *@apiResult
  * api event for :ref:`APIAddSecurityGroupRuleMsg`
@@ -50,6 +54,7 @@ import org.zstack.header.message.APIEvent;
 }
  */
 
+@RestResponse(allTo = "inventory")
 public class APIAddSecurityGroupRuleEvent extends APIEvent {
     /**
      * @desc see :ref:`SecurityGroupInventory`
@@ -71,4 +76,19 @@ public class APIAddSecurityGroupRuleEvent extends APIEvent {
     public void setInventory(SecurityGroupInventory inventory) {
         this.inventory = inventory;
     }
+ 
+    public static APIAddSecurityGroupRuleEvent __example__() {
+        APIAddSecurityGroupRuleEvent event = new APIAddSecurityGroupRuleEvent();
+        SecurityGroupInventory sec = new SecurityGroupInventory();
+        sec.setUuid(uuid());
+        sec.setName("web");
+        sec.setDescription("for test");
+        sec.setState("Enabled");
+        sec.setCreateDate(new Timestamp(System.currentTimeMillis()));
+        sec.setLastOpDate(new Timestamp(System.currentTimeMillis()));
+        event.setInventory(sec);
+        event.setSuccess(true);
+        return event;
+    }
+
 }

@@ -9,7 +9,25 @@ public class HostCapacityStruct {
     private long totalMemory;
     private long usedCpu;
     private long usedMemory;
+    private int cpuNum;
+    private int cpuSockets;
     private boolean init;
+
+    public int getCpuSockets() {
+        return cpuSockets;
+    }
+
+    public void setCpuSockets(int cpuSockets) {
+        this.cpuSockets = cpuSockets;
+    }
+
+    public int getCpuNum() {
+        return cpuNum;
+    }
+
+    public void setCpuNum(int cpuNum) {
+        this.cpuNum = cpuNum;
+    }
 
     public HostCapacityVO getCapacityVO() {
         return capacityVO;

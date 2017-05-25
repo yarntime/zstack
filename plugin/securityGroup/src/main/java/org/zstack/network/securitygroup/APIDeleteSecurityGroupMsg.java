@@ -1,9 +1,14 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APIDeleteMessage;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
+
 /**
  * @api
  * delete security group
@@ -43,6 +48,11 @@ import org.zstack.header.message.APIParam;
  * see :ref:`APIDeleteSecurityGroupEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/{uuid}",
+        method = HttpMethod.DELETE,
+        responseClass = APIDeleteSecurityGroupEvent.class
+)
 public class APIDeleteSecurityGroupMsg extends APIDeleteMessage {
     /**
      * @desc security group uuid
@@ -57,4 +67,26 @@ public class APIDeleteSecurityGroupMsg extends APIDeleteMessage {
     public void setUuid(String securityGroupUuid) {
         this.uuid = securityGroupUuid;
     }
+ 
+    public static APIDeleteSecurityGroupMsg __example__() {
+        APIDeleteSecurityGroupMsg msg = new APIDeleteSecurityGroupMsg();
+        msg.setUuid(uuid());
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Deleted").resource(uuid,SecurityGroupVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

@@ -3,18 +3,16 @@ package org.zstack.header.storage.primary;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ShadowEntity;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 import java.sql.Timestamp;
 
 /**
  */
 @Entity
 @Table
-public class PrimaryStorageCapacityVO {
+public class PrimaryStorageCapacityVO implements ShadowEntity {
     @Column
     @Id
     @ForeignKey(parentEntityClass = PrimaryStorageEO.class, onDeleteAction = ReferenceOption.CASCADE)
@@ -37,10 +35,33 @@ public class PrimaryStorageCapacityVO {
     private long availablePhysicalCapacity;
 
     @Column
+    private Long systemUsedCapacity;
+
+    @Column
     private Timestamp createDate;
 
     @Column
     private Timestamp lastOpDate;
+
+    @Transient
+    private PrimaryStorageCapacityVO shadow;
+
+    public PrimaryStorageCapacityVO getShadow() {
+        return shadow;
+    }
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
+    public Long getSystemUsedCapacity() {
+        return systemUsedCapacity;
+    }
+
+    public void setSystemUsedCapacity(Long systemUsedCapacity) {
+        this.systemUsedCapacity = systemUsedCapacity;
+    }
 
     public long getTotalPhysicalCapacity() {
         return totalPhysicalCapacity;
@@ -96,5 +117,10 @@ public class PrimaryStorageCapacityVO {
 
     public void setLastOpDate(Timestamp lastOpDate) {
         this.lastOpDate = lastOpDate;
+    }
+
+    @Override
+    public void setShadow(Object o) {
+        shadow = (PrimaryStorageCapacityVO) o;
     }
 }

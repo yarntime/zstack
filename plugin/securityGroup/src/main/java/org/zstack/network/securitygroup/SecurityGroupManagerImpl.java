@@ -8,9 +8,7 @@ import org.zstack.core.cloudbus.MessageSafe;
 import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.config.GlobalConfig;
 import org.zstack.core.config.GlobalConfigUpdateExtensionPoint;
-import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.DbEntityLister;
-import org.zstack.core.db.SimpleQuery;
+import org.zstack.core.db.*;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.core.thread.AsyncThread;
@@ -22,19 +20,19 @@ import org.zstack.header.core.Completion;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.host.HostStatus;
-import org.zstack.header.identity.IdentityErrors;
-import org.zstack.header.identity.Quota;
-import org.zstack.header.identity.Quota.CheckQuotaForApiMessage;
+import org.zstack.header.identity.*;
+import org.zstack.header.identity.Quota.QuotaOperator;
 import org.zstack.header.identity.Quota.QuotaPair;
-import org.zstack.header.identity.ReportQuotaExtensionPoint;
-import org.zstack.header.managementnode.ManagementNodeChangeListener;
+import org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
+import org.zstack.header.message.NeedQuotaCheckMessage;
 import org.zstack.header.query.AddExpandedQueryExtensionPoint;
 import org.zstack.header.query.ExpandedQueryAliasStruct;
 import org.zstack.header.query.ExpandedQueryStruct;
 import org.zstack.header.vm.*;
 import org.zstack.identity.AccountManager;
+import org.zstack.identity.QuotaUtil;
 import org.zstack.network.securitygroup.APIAddSecurityGroupRuleMsg.SecurityGroupRuleAO;
 import org.zstack.query.QueryFacade;
 import org.zstack.tag.TagManager;
@@ -54,10 +52,11 @@ import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static java.util.Arrays.asList;
 import static org.zstack.utils.CollectionDSL.list;
 
-public class SecurityGroupManagerImpl extends AbstractService implements SecurityGroupManager, ManagementNodeChangeListener,
-          VmInstanceMigrateExtensionPoint, AddExpandedQueryExtensionPoint, ReportQuotaExtensionPoint {
+public class SecurityGroupManagerImpl extends AbstractService implements SecurityGroupManager, ManagementNodeReadyExtensionPoint,
+        VmInstanceMigrateExtensionPoint, AddExpandedQueryExtensionPoint, ReportQuotaExtensionPoint {
     private static CLogger logger = Utils.getLogger(SecurityGroupManagerImpl.class);
 
     @Autowired
@@ -86,25 +85,44 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
     @Override
     public List<Quota> reportQuota() {
-        CheckQuotaForApiMessage checker = new CheckQuotaForApiMessage() {
+        QuotaOperator checker = new QuotaOperator() {
             @Override
             public void checkQuota(APIMessage msg, Map<String, QuotaPair> pairs) {
-                if (msg instanceof APICreateSecurityGroupMsg) {
-                    check((APICreateSecurityGroupMsg)msg, pairs);
+                if (!new QuotaUtil().isAdminAccount(msg.getSession().getAccountUuid())) {
+                    if (msg instanceof APICreateSecurityGroupMsg) {
+                        check((APICreateSecurityGroupMsg) msg, pairs);
+                    }
                 }
             }
 
-            @Transactional(readOnly = true)
-            private void check(APICreateSecurityGroupMsg msg, Map<String, QuotaPair> pairs) {
-                long sgNum = pairs.get(SecurityGroupConstant.QUOTA_SG_NUM).getValue();
+            @Override
+            public void checkQuota(NeedQuotaCheckMessage msg, Map<String, QuotaPair> pairs) {
 
+            }
+
+            @Override
+            public List<Quota.QuotaUsage> getQuotaUsageByAccount(String accountUuid) {
+                Quota.QuotaUsage usage = new Quota.QuotaUsage();
+                usage.setName(SecurityGroupConstant.QUOTA_SG_NUM);
+                usage.setUsed(getUsedSg(accountUuid));
+                return list(usage);
+            }
+
+            @Transactional(readOnly = true)
+            private long getUsedSg(String accountUuid) {
                 String sql = "select count(sg) from SecurityGroupVO sg, AccountResourceRefVO ref where ref.resourceUuid = sg.uuid" +
                         " and ref.accountUuid = :auuid and ref.resourceType = :rtype";
                 TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
-                q.setParameter("auuid", msg.getSession().getAccountUuid());
+                q.setParameter("auuid", accountUuid);
                 q.setParameter("rtype", SecurityGroupVO.class.getSimpleName());
                 Long sgn = q.getSingleResult();
                 sgn = sgn == null ? 0 : sgn;
+                return sgn;
+            }
+
+            private void check(APICreateSecurityGroupMsg msg, Map<String, QuotaPair> pairs) {
+                long sgNum = pairs.get(SecurityGroupConstant.QUOTA_SG_NUM).getValue();
+                long sgn = getUsedSg(msg.getSession().getAccountUuid());
 
                 if (sgn + 1 > sgNum) {
                     throw new ApiMessageInterceptionException(errf.instantiateErrorCode(IdentityErrors.QUOTA_EXCEEDING,
@@ -116,8 +134,8 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         };
 
         Quota quota = new Quota();
-        quota.setChecker(checker);
-        quota.setMessageNeedValidation(APICreateSecurityGroupMsg.class);
+        quota.setOperator(checker);
+        quota.addMessageNeedValidation(APICreateSecurityGroupMsg.class);
 
         QuotaPair p = new QuotaPair();
         p.setName(SecurityGroupConstant.QUOTA_SG_NUM);
@@ -125,6 +143,12 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         quota.addPair(p);
 
         return list(quota);
+    }
+
+    @Override
+    @AsyncThread
+    public void managementNodeReady() {
+        startFailureHostCopingThread();
     }
 
     private class RuleCalculator {
@@ -152,13 +176,16 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
         @Transactional(readOnly = true)
         private List<HostRuleTO> calculateByHost() {
-            String sql = "select nic.uuid from VmNicVO nic, VmInstanceVO vm, VmNicSecurityGroupRefVO ref where nic.uuid = ref.vmNicUuid and nic.vmInstanceUuid = vm.uuid and vm.hostUuid in (:hostUuids) and vm.state in (:vmStates)";
+            String sql = "select nic.uuid from VmNicVO nic, VmInstanceVO vm, VmNicSecurityGroupRefVO ref" +
+                    " where nic.uuid = ref.vmNicUuid and nic.vmInstanceUuid = vm.uuid" +
+                    " and vm.hostUuid in (:hostUuids) and vm.state in (:vmStates)";
             TypedQuery<String> insgQuery = dbf.getEntityManager().createQuery(sql, String.class);
             insgQuery.setParameter("hostUuids", hostUuids);
             insgQuery.setParameter("vmStates", vmStates);
             List<String> nicsInSg = insgQuery.getResultList();
 
-            sql = "select nic.uuid from VmNicVO nic, VmInstanceVO vm where nic.vmInstanceUuid = vm.uuid and vm.hostUuid in (:hostUuids) and vm.state in (:vmStates)";
+            sql = "select nic.uuid from VmNicVO nic, VmInstanceVO vm where nic.vmInstanceUuid = vm.uuid" +
+                    " and vm.hostUuid in (:hostUuids) and vm.state in (:vmStates)";
             TypedQuery<String> allq = dbf.getEntityManager().createQuery(sql, String.class);
             allq.setParameter("hostUuids", hostUuids);
             allq.setParameter("vmStates", vmStates);
@@ -195,7 +222,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
             return null;
         }
 
-        List<HostRuleTO> mergeMultiHostRuleTO(Collection<HostRuleTO>...htos) {
+        List<HostRuleTO> mergeMultiHostRuleTO(Collection<HostRuleTO>... htos) {
             Map<String, HostRuleTO> hostRuleTOMap = new HashMap<String, HostRuleTO>();
             for (Collection<HostRuleTO> lst : htos) {
                 for (HostRuleTO hto : lst) {
@@ -223,7 +250,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         }
 
         private List<RuleTO> calculateRuleTOBySecurityGroup(List<String> sgUuids, String l3Uuid) {
-            List<RuleTO> ret = new ArrayList<RuleTO>();
+            List<RuleTO> ret = new ArrayList<>();
 
             for (String sgUuid : sgUuids) {
                 String sql = "select r from SecurityGroupRuleVO r where r.securityGroupUuid = :sgUuid";
@@ -234,13 +261,18 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
                     continue;
                 }
 
-                sql = "select nic.ip from VmNicVO nic, VmNicSecurityGroupRefVO ref where ref.vmNicUuid = nic.uuid and ref.securityGroupUuid = :sgUuid and nic.l3NetworkUuid = :l3Uuid";
+                sql = "select nic.ip" +
+                        " from VmNicVO nic, VmNicSecurityGroupRefVO ref" +
+                        " where ref.vmNicUuid = nic.uuid" +
+                        " and ref.securityGroupUuid = :sgUuid" +
+                        " and nic.l3NetworkUuid = :l3Uuid" +
+                        " and nic.ip is not null";
                 TypedQuery<String> internalIpQuery = dbf.getEntityManager().createQuery(sql, String.class);
                 internalIpQuery.setParameter("sgUuid", sgUuid);
                 internalIpQuery.setParameter("l3Uuid", l3Uuid);
                 List<String> internalIps = internalIpQuery.getResultList();
                 List<Pair<String, String>> ipRanges = NetworkUtils.findConsecutiveIpRange(internalIps);
-                List<String> internalIpRanges = new ArrayList<String>(ipRanges.size());
+                List<String> internalIpRanges = new ArrayList<>(ipRanges.size());
                 for (Pair<String, String> p : ipRanges) {
                     if (p.first().equals(p.second())) {
                         internalIpRanges.add(p.first());
@@ -407,7 +439,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
     private void handleLocalMessage(Message msg) {
         if (msg instanceof RefreshSecurityGroupRulesOnHostMsg) {
             handle((RefreshSecurityGroupRulesOnHostMsg) msg);
-        } else if (msg instanceof RefreshSecurityGroupRulesOnVmMsg){
+        } else if (msg instanceof RefreshSecurityGroupRulesOnVmMsg) {
             handle((RefreshSecurityGroupRulesOnVmMsg) msg);
         } else if (msg instanceof RemoveVmNicFromSecurityGroupMsg) {
             handle((RemoveVmNicFromSecurityGroupMsg) msg);
@@ -466,9 +498,9 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
     private void handle(RefreshSecurityGroupRulesOnHostMsg msg) {
         RuleCalculator cal = new RuleCalculator();
-        cal.hostUuids = Arrays.asList(msg.getHostUuid());
+        cal.hostUuids = asList(msg.getHostUuid());
         // refreshing may happen when host is reconnecting; at that time VMs' states are Unknown
-        cal.vmStates = Arrays.asList(VmInstanceState.Unknown, VmInstanceState.Running);
+        cal.vmStates = asList(VmInstanceState.Unknown, VmInstanceState.Running);
         List<HostRuleTO> htos = cal.calculate();
         for (HostRuleTO hto : htos) {
             hto.setRefreshHost(true);
@@ -483,22 +515,20 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         } else if (msg instanceof APIListSecurityGroupMsg) {
             handle((APIListSecurityGroupMsg) msg);
         } else if (msg instanceof APIAddSecurityGroupRuleMsg) {
-            handle((APIAddSecurityGroupRuleMsg)msg);
+            handle((APIAddSecurityGroupRuleMsg) msg);
         } else if (msg instanceof APIAddVmNicToSecurityGroupMsg) {
-            handle((APIAddVmNicToSecurityGroupMsg)msg);
+            handle((APIAddVmNicToSecurityGroupMsg) msg);
         } else if (msg instanceof APIDeleteSecurityGroupRuleMsg) {
-            handle((APIDeleteSecurityGroupRuleMsg)msg);
+            handle((APIDeleteSecurityGroupRuleMsg) msg);
         } else if (msg instanceof APIDeleteSecurityGroupMsg) {
-            handle((APIDeleteSecurityGroupMsg)msg);
+            handle((APIDeleteSecurityGroupMsg) msg);
         } else if (msg instanceof APIDeleteVmNicFromSecurityGroupMsg) {
-            handle((APIDeleteVmNicFromSecurityGroupMsg)msg);
+            handle((APIDeleteVmNicFromSecurityGroupMsg) msg);
         } else if (msg instanceof APIListVmNicInSecurityGroupMsg) {
-            handle((APIListVmNicInSecurityGroupMsg)msg);
+            handle((APIListVmNicInSecurityGroupMsg) msg);
         } else if (msg instanceof APIAttachSecurityGroupToL3NetworkMsg) {
             handle((APIAttachSecurityGroupToL3NetworkMsg) msg);
-        } else if (msg instanceof APIQueryVmNicInSecurityGroupMsg) {
-            handle((APIQueryVmNicInSecurityGroupMsg) msg);
-        } else if (msg instanceof APIChangeSecurityGroupStateMsg) {
+        }  else if (msg instanceof APIChangeSecurityGroupStateMsg) {
             handle((APIChangeSecurityGroupStateMsg) msg);
         } else if (msg instanceof APIDetachSecurityGroupFromL3NetworkMsg) {
             handle((APIDetachSecurityGroupFromL3NetworkMsg) msg);
@@ -543,32 +573,32 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         List<String> nicUuidsToExclued = nq.getResultList();
 
         TypedQuery<VmNicVO> q;
-        if (nicUuidsToInclude == null)  {
+        if (nicUuidsToInclude == null) {
             // accessed by an admin
             if (nicUuidsToExclued.isEmpty()) {
                 sql = "select nic from VmNicVO nic, VmInstanceVO vm, SecurityGroupVO sg, SecurityGroupL3NetworkRefVO ref " +
                         "where nic.vmInstanceUuid = vm.uuid and nic.l3NetworkUuid = ref.l3NetworkUuid and ref.securityGroupUuid = sg.uuid " +
-                        " and sg.uuid = :sgUuid and vm.type = :vmType group by nic.uuid";
+                        " and sg.uuid = :sgUuid and vm.type = :vmType and vm.state in (:vmStates) group by nic.uuid";
                 q = dbf.getEntityManager().createQuery(sql, VmNicVO.class);
             } else {
                 sql = "select nic from VmNicVO nic, VmInstanceVO vm, SecurityGroupVO sg, SecurityGroupL3NetworkRefVO ref " +
                         "where nic.vmInstanceUuid = vm.uuid and nic.l3NetworkUuid = ref.l3NetworkUuid and ref.securityGroupUuid = sg.uuid " +
-                        " and sg.uuid = :sgUuid and vm.type = :vmType and nic.uuid not in (:nicUuids) group by nic.uuid";
+                        " and sg.uuid = :sgUuid and vm.type = :vmType and vm.state in (:vmStates) and nic.uuid not in (:nicUuids) group by nic.uuid";
                 q = dbf.getEntityManager().createQuery(sql, VmNicVO.class);
                 q.setParameter("nicUuids", nicUuidsToExclued);
             }
-        } else  {
+        } else {
             // accessed by a normal account
             if (nicUuidsToExclued.isEmpty()) {
                 sql = "select nic from VmNicVO nic, VmInstanceVO vm, SecurityGroupVO sg, SecurityGroupL3NetworkRefVO ref " +
                         "where nic.vmInstanceUuid = vm.uuid and nic.l3NetworkUuid = ref.l3NetworkUuid and ref.securityGroupUuid = sg.uuid " +
-                        " and sg.uuid = :sgUuid and vm.type = :vmType and nic.uuid in (:iuuids) group by nic.uuid";
+                        " and sg.uuid = :sgUuid and vm.type = :vmType and vm.state in (:vmStates) and nic.uuid in (:iuuids) group by nic.uuid";
                 q = dbf.getEntityManager().createQuery(sql, VmNicVO.class);
                 q.setParameter("iuuids", nicUuidsToInclude);
             } else {
                 sql = "select nic from VmNicVO nic, VmInstanceVO vm, SecurityGroupVO sg, SecurityGroupL3NetworkRefVO ref " +
                         "where nic.vmInstanceUuid = vm.uuid and nic.l3NetworkUuid = ref.l3NetworkUuid and ref.securityGroupUuid = sg.uuid " +
-                        " and sg.uuid = :sgUuid and vm.type = :vmType and nic.uuid not in (:nicUuids) and nic.uuid in (:iuuids) group by nic.uuid";
+                        " and sg.uuid = :sgUuid and vm.type = :vmType and vm.state in (:vmStates) and nic.uuid not in (:nicUuids) and nic.uuid in (:iuuids) group by nic.uuid";
                 q = dbf.getEntityManager().createQuery(sql, VmNicVO.class);
                 q.setParameter("nicUuids", nicUuidsToExclued);
                 q.setParameter("iuuids", nicUuidsToInclude);
@@ -578,6 +608,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
         q.setParameter("sgUuid", sgId);
         q.setParameter("vmType", VmInstanceConstant.USER_VM_TYPE);
+        q.setParameter("vmStates", list(VmInstanceState.Running, VmInstanceState.Stopped));
         return q.getResultList();
     }
 
@@ -647,13 +678,6 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         bus.publish(evt);
     }
 
-    private void handle(APIQueryVmNicInSecurityGroupMsg msg) {
-        List<VmNicSecurityGroupRefInventory> invs = qf.query(msg, VmNicSecurityGroupRefInventory.class);
-        APIQueryVmNicInSecurityGroupReply reply = new APIQueryVmNicInSecurityGroupReply();
-        reply.setInventories(invs);
-        bus.reply(msg, reply);
-    }
-
     private void handle(APIAttachSecurityGroupToL3NetworkMsg msg) {
         APIAttachSecurityGroupToL3NetworkEvent evt = new APIAttachSecurityGroupToL3NetworkEvent(msg.getId());
         SimpleQuery<SecurityGroupL3NetworkRefVO> q = dbf.createQuery(SecurityGroupL3NetworkRefVO.class);
@@ -696,7 +720,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
         RuleCalculator cal1 = new RuleCalculator();
         cal1.l3NetworkUuids = l3Uuids;
-        cal1.securityGroupUuids = Arrays.asList(sgUuid);
+        cal1.securityGroupUuids = asList(sgUuid);
         List<HostRuleTO> htos1 = cal1.calculate();
 
         // nics may be in other security group
@@ -742,7 +766,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         if (!vmNicUuids.isEmpty()) {
             RuleCalculator cal = new RuleCalculator();
             cal.vmNicUuids = vmNicUuids;
-            cal.vmStates = Arrays.asList(VmInstanceState.Running);
+            cal.vmStates = asList(VmInstanceState.Running);
             List<HostRuleTO> htos = cal.calculate();
 
             SimpleQuery<VmNicSecurityGroupRefVO> refq = dbf.createQuery(VmNicSecurityGroupRefVO.class);
@@ -754,7 +778,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
             if (!vmNicUuids.isEmpty()) {
                 // these vm nics are no longer in any security group, delete their chains on host
                 Collection<HostRuleTO> toRemove = cal.createRulePlaceHolder(vmNicUuids);
-                for (HostRuleTO hto : toRemove)  {
+                for (HostRuleTO hto : toRemove) {
                     hto.setActionCodeForAllSecurityGroupRuleTOs(SecurityGroupRuleTO.ACTION_CODE_DELETE_CHAIN);
                 }
 
@@ -778,8 +802,8 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         dbf.removeByPrimaryKeys(msg.getRuleUuids(), SecurityGroupRuleVO.class);
 
         RuleCalculator cal = new RuleCalculator();
-        cal.securityGroupUuids = Arrays.asList(sgUuid);
-        cal.vmStates = Arrays.asList(VmInstanceState.Running);
+        cal.securityGroupUuids = asList(sgUuid);
+        cal.vmStates = asList(VmInstanceState.Running);
 
         List<HostRuleTO> htos = cal.calculate();
         applyRules(htos);
@@ -813,15 +837,15 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         dbf.persistCollection(refs);
 
         SimpleQuery<VmInstanceVO> vmq = dbf.createQuery(VmInstanceVO.class);
-        q.add(VmInstanceVO_.uuid, Op.IN, vmUuids);
-        q.add(VmInstanceVO_.state, Op.EQ, VmInstanceState.Running);
+        vmq.add(VmInstanceVO_.uuid, Op.IN, vmUuids);
+        vmq.add(VmInstanceVO_.state, Op.EQ, VmInstanceState.Running);
         boolean triggerApplyRules = vmq.count() > 0;
 
         if (triggerApplyRules) {
             RuleCalculator cal = new RuleCalculator();
-            cal.securityGroupUuids = Arrays.asList(msg.getSecurityGroupUuid());
+            cal.securityGroupUuids = asList(msg.getSecurityGroupUuid());
             cal.l3NetworkUuids = l3Uuids;
-            cal.vmStates = Arrays.asList(VmInstanceState.Running);
+            cal.vmStates = asList(VmInstanceState.Running);
             List<HostRuleTO> htos = cal.calculate();
             applyRules(htos);
         }
@@ -833,7 +857,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
     private void applyRules(Collection<HostRuleTO> htos) {
         for (final HostRuleTO h : htos) {
             SecurityGroupHypervisorBackend bkend = hypervisorBackends.get(h.getHypervisorType());
-            bkend.applyRules(h, new Completion() {
+            bkend.applyRules(h, new Completion(null) {
                 private void copeWithFailureHost() {
                     createFailureHostTask(h.getHostUuid());
                 }
@@ -870,8 +894,8 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         dbf.persistCollection(vos);
 
         RuleCalculator cal = new RuleCalculator();
-        cal.securityGroupUuids = Arrays.asList(msg.getSecurityGroupUuid());
-        cal.vmStates = Arrays.asList(VmInstanceState.Running);
+        cal.securityGroupUuids = asList(msg.getSecurityGroupUuid());
+        cal.vmStates = asList(VmInstanceState.Running);
         List<HostRuleTO> htos = cal.calculate();
         applyRules(htos);
 
@@ -901,10 +925,17 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
         vo.setState(SecurityGroupState.Enabled);
         vo.setInternalId(dbf.generateSequenceNumber(SecurityGroupSequenceNumberVO.class));
 
-        vo = dbf.persistAndRefresh(vo);
-
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), SecurityGroupVO.class);
-        tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), SecurityGroupVO.class.getSimpleName());
+        SecurityGroupVO finalVo = vo;
+        vo = new SQLBatchWithReturn<SecurityGroupVO>() {
+            @Override
+            protected SecurityGroupVO scripts() {
+                persist(finalVo);
+                reload(finalVo);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), finalVo.getUuid(), SecurityGroupVO.class);
+                tagMgr.createTagsFromAPICreateMessage(msg, finalVo.getUuid(), SecurityGroupVO.class.getSimpleName());
+                return finalVo;
+            }
+        }.execute();
 
         SecurityGroupInventory inv = SecurityGroupInventory.valueOf(vo);
         APICreateSecurityGroupEvent evt = new APICreateSecurityGroupEvent(msg.getId());
@@ -982,8 +1013,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
     }
 
     @Override
-    public String preMigrateVm(VmInstanceInventory inv, String destHostUuid) {
-        return null;
+    public void preMigrateVm(VmInstanceInventory inv, String destHostUuid) {
     }
 
     @Override
@@ -991,7 +1021,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
     }
 
     @Override
-    public void afterMigrateVm(final VmInstanceInventory inv, final String destHostUuid) {
+    public void afterMigrateVm(final VmInstanceInventory inv, final String srcHostUuid) {
         RuleCalculator cal = new RuleCalculator();
         cal.vmNicUuids = CollectionUtils.transformToList(inv.getVmNics(), new Function<String, VmNicInventory>() {
             @Override
@@ -999,22 +1029,22 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
                 return arg.getUuid();
             }
         });
-        cal.vmStates = Arrays.asList(VmInstanceState.Running);
+        cal.vmStates = asList(VmInstanceState.Running);
         List<HostRuleTO> htos = cal.calculate();
         applyRules(htos);
 
         SecurityGroupHypervisorBackend bkd = getHypervisorBackend(inv.getHypervisorType());
-        bkd.cleanUpUnusedRuleOnHost(inv.getLastHostUuid(), new Completion() {
+        bkd.cleanUpUnusedRuleOnHost(inv.getLastHostUuid(), new Completion(null) {
             @Override
             public void success() {
                 logger.debug(String.format("vm[uuid:%s, name:%s] migrated to host[uuid:%s], cleanup its old rules on host[uuid:%s] if needed",
-                        inv.getUuid(), inv.getName(), destHostUuid, inv.getLastHostUuid()));
+                        inv.getUuid(), inv.getName(), inv.getHostUuid(), srcHostUuid));
             }
 
             @Override
             public void fail(ErrorCode errorCode) {
                 logger.debug(String.format("vm[uuid:%s, name:%s] migrated to host[uuid:%s], failed to cleanup its old rules on host[uuid:%s] if needed",
-                        inv.getUuid(), inv.getName(), destHostUuid, inv.getLastHostUuid()));
+                        inv.getUuid(), inv.getName(), inv.getHostUuid(), srcHostUuid));
                 createFailureHostTask(inv.getLastHostUuid());
             }
         });
@@ -1029,7 +1059,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
                 return arg.getUuid();
             }
         });
-        cal.vmStates = Arrays.asList(VmInstanceState.Unknown);
+        cal.vmStates = asList(VmInstanceState.Unknown);
         List<HostRuleTO> htos = cal.calculate();
 
         logger.debug(String.format("vm[uuid:%s, name:%s] failed to migrate to host[uuid:%s], recover its rules on previous host[uuid:%s]",
@@ -1073,7 +1103,7 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
             q.setLockMode(LockModeType.PESSIMISTIC_READ);
             q.setParameter("hostConnectionState", HostStatus.Connected);
             q.setMaxResults(failureHostEachTimeTake);
-            List<SecurityGroupFailureHostVO> lst =  q.getResultList();
+            List<SecurityGroupFailureHostVO> lst = q.getResultList();
             if (lst.isEmpty()) {
                 return lst;
             }
@@ -1107,12 +1137,20 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
 
             for (final SecurityGroupFailureHostVO vo : vos) {
                 RuleCalculator cal = new RuleCalculator();
-                cal.hostUuids = Arrays.asList(vo.getHostUuid());
+                cal.hostUuids = asList(vo.getHostUuid());
+                cal.vmStates = asList(VmInstanceState.Running);
                 List<HostRuleTO> htos = cal.calculate();
+                if (htos.isEmpty()) {
+                    logger.debug(String.format("no security rules needs to be applied to the host[uuid:%s], clean up it" +
+                            " from SecurityGroupFailureHostVO", vo.getHostUuid()));
+                    dbf.remove(vo);
+                    continue;
+                }
+
                 final HostRuleTO hto = htos.get(0);
                 hto.setRefreshHost(true);
                 SecurityGroupHypervisorBackend bd = getHypervisorBackend(hto.getHypervisorType());
-                bd.applyRules(hto, new Completion() {
+                bd.applyRules(hto, new Completion(null) {
                     @Override
                     public void success() {
                         logger.debug(String.format("successfully re-apply security group rules to host[uuid:%s]", hto.getHostUuid()));
@@ -1143,23 +1181,4 @@ public class SecurityGroupManagerImpl extends AbstractService implements Securit
             return FailureHostWorker.class.getName();
         }
     }
-
-    @Override
-    public void nodeJoin(String nodeId) {
-    }
-
-    @Override
-    public void nodeLeft(String nodeId) {
-    }
-
-    @Override
-    public void iAmDead(String nodeId) {
-    }
-
-    @Override
-    @AsyncThread
-    public void iJoin(String nodeId) {
-        startFailureHostCopingThread();
-    }
-
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="120">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
 	<TestCase class="org.zstack.test.securitygroup.TestCreateSecurityGroup"/>
     <TestCase class="org.zstack.test.securitygroup.TestChangeSecurityGroupState"/>
 	<TestCase class="org.zstack.test.securitygroup.TestAddSecurityGroupRule"/>
@@ -44,4 +44,5 @@
 	<TestCase class="org.zstack.test.securitygroup.TestUpdateSecurityGroup"/>
 	<TestCase class="org.zstack.test.securitygroup.TestPolicyForSecurityGroup"/>
 	<TestCase class="org.zstack.test.securitygroup.TestPolicyForSecurityGroup1"/>
+	<TestCase class="org.zstack.test.securitygroup.TestSecurityGroupVmNicNotInAttachedL3"/>
 </UnitTestSuiteConfig>

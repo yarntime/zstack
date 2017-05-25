@@ -6,17 +6,13 @@ import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
+import java.io.Serializable;
 import java.sql.Timestamp;
 
-/**
- * Created by frank on 6/30/2015.
- */
 @Entity
 @Table
+@IdClass(CompositePrimaryKeyForLocalStorageHostRefVO.class)
 public class LocalStorageHostRefVO {
     @Column
     @Id
@@ -24,6 +20,7 @@ public class LocalStorageHostRefVO {
     private String hostUuid;
 
     @Column
+    @Id
     @ForeignKey(parentEntityClass = PrimaryStorageEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String primaryStorageUuid;
 
@@ -44,10 +41,26 @@ public class LocalStorageHostRefVO {
     private long availablePhysicalCapacity;
 
     @Column
+    private long systemUsedCapacity;
+
+    @Column
     private Timestamp createDate;
 
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
+    public long getSystemUsedCapacity() {
+        return systemUsedCapacity;
+    }
+
+    public void setSystemUsedCapacity(long systemUsedCapacity) {
+        this.systemUsedCapacity = systemUsedCapacity;
+    }
 
     public String getPrimaryStorageUuid() {
         return primaryStorageUuid;

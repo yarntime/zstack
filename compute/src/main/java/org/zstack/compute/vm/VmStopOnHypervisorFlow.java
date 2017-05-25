@@ -7,10 +7,12 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.core.workflow.Flow;
 import org.zstack.header.core.workflow.FlowTrigger;
+import org.zstack.header.core.workflow.NoRollbackFlow;
 import org.zstack.header.host.HostConstant;
+import org.zstack.header.host.HostErrors;
 import org.zstack.header.message.MessageReply;
+import org.zstack.header.vm.APIStopVmInstanceMsg;
 import org.zstack.header.vm.StopVmOnHypervisorMsg;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceSpec;
@@ -18,7 +20,7 @@ import org.zstack.header.vm.VmInstanceSpec;
 import java.util.Map;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
-public class VmStopOnHypervisorFlow implements Flow {
+public class VmStopOnHypervisorFlow extends NoRollbackFlow {
     @Autowired
     protected DatabaseFacade dbf;
     @Autowired
@@ -32,6 +34,9 @@ public class VmStopOnHypervisorFlow implements Flow {
 
         StopVmOnHypervisorMsg msg = new StopVmOnHypervisorMsg();
         msg.setVmInventory(spec.getVmInventory());
+        if (spec.getMessage() instanceof APIStopVmInstanceMsg) {
+           msg.setType(((APIStopVmInstanceMsg)spec.getMessage()).getType());
+        }
         bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, spec.getVmInventory().getHostUuid());
         bus.send(msg, new CloudBusCallBack(chain) {
             @Override
@@ -39,14 +44,21 @@ public class VmStopOnHypervisorFlow implements Flow {
                 if (reply.isSuccess()) {
                     chain.next();
                 } else {
-                    chain.fail(reply.getError());
+                    if (spec.isGcOnStopFailure() && reply.getError().isError(HostErrors.OPERATION_FAILURE_GC_ELIGIBLE)) {
+
+                        StopVmGC gc = new StopVmGC();
+                        gc.inventory = spec.getVmInventory();
+                        gc.hostUuid = spec.getVmInventory().getHostUuid();
+                        gc.NAME = String.format("gc-stop-vm-%s-%s-on-host-%s", gc.inventory.getUuid(),
+                                gc.inventory.getName(), gc.hostUuid);
+                        gc.submit();
+
+                        chain.next();
+                    } else {
+                        chain.fail(reply.getError());
+                    }
                 }
             }
         });
-    }
-
-    @Override
-    public void rollback(FlowTrigger chain, Map data) {
-        chain.rollback();
     }
 }

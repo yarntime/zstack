@@ -17,6 +17,12 @@ public class CephPrimaryStorageMonInventory {
     private Timestamp createDate;
     private Timestamp lastOpDate;
     private String primaryStorageUuid;
+    private String monAddr;
+    private String sshUsername;
+    private String sshPassword;
+    private Integer sshPort;
+    private String status;
+    private String monUuid;
 
     public static CephPrimaryStorageMonInventory valueOf(CephPrimaryStorageMonVO vo) {
         CephPrimaryStorageMonInventory inv = new CephPrimaryStorageMonInventory();
@@ -25,6 +31,12 @@ public class CephPrimaryStorageMonInventory {
         inv.setCreateDate(vo.getCreateDate());
         inv.setLastOpDate(vo.getLastOpDate());
         inv.setPrimaryStorageUuid(vo.getPrimaryStorageUuid());
+        inv.setSshPort(vo.getSshPort());
+        inv.setSshUsername(vo.getSshUsername());
+        inv.setSshPassword(vo.getSshPassword());
+        inv.setMonUuid(vo.getUuid());
+        inv.setStatus(vo.getStatus().toString());
+        inv.setMonAddr(vo.getMonAddr());
         return inv;
     }
 
@@ -37,6 +49,43 @@ public class CephPrimaryStorageMonInventory {
         return invs;
     }
 
+    public String getMonAddr() {
+        return monAddr;
+    }
+
+    public void setMonAddr(String monAddr) {
+        this.monAddr = monAddr;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getSshPassword() {
+        return sshPassword;
+    }
+
+    public void setSshPassword(String sshPassword) {
+        this.sshPassword = sshPassword;
+    }
+    public String getSshUsername() {
+        return sshUsername;
+    }
+
+    public void setSshUsername(String sshUsername) {
+        this.sshUsername = sshUsername;
+    }
+    public Integer getSshPort() {
+        return sshPort;
+    }
+
+    public void setSshPort(Integer sshPort) {
+        this.sshPort = sshPort;
+    }
     public String getPrimaryStorageUuid() {
         return primaryStorageUuid;
     }
@@ -71,6 +120,14 @@ public class CephPrimaryStorageMonInventory {
 
     public Timestamp getLastOpDate() {
         return lastOpDate;
+    }
+
+    public String getMonUuid() {
+        return monUuid;
+    }
+
+    public void setMonUuid(String monUuid) {
+        this.monUuid = monUuid;
     }
 
     public void setLastOpDate(Timestamp lastOpDate) {

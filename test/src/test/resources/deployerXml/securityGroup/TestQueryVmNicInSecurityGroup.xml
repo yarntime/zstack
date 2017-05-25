@@ -12,12 +12,15 @@
 	<images>
 		<image name="TestImage" description="Test" format="simulator">
 			<backupStorageRef>simulatorBackupStorage</backupStorageRef>
+			<accountRef>TestAccount</accountRef>
 		</image>
 	</images>
 
 	<instanceOfferings>
 		<instanceOffering name="TestInstanceOffering"
-			description="Test" memoryCapacity="3G" cpuNum="1" cpuSpeed="3000" />
+			description="Test" memoryCapacity="3G" cpuNum="1" cpuSpeed="3000">
+			<accountRef>TestAccount</accountRef>
+		</instanceOffering>
 	</instanceOfferings>
 
 	<vm>
@@ -74,6 +77,8 @@
 							<networkService provider="SecurityGroup">
 								<serviceType>SecurityGroup</serviceType>
 							</networkService>
+
+							<accountRef>TestAccount</accountRef>
 						</l3BasicNetwork>
 					</l3Networks>
 				</l2NoVlanNetwork>

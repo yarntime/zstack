@@ -1,51 +1,53 @@
 package org.zstack.header.storage.backup;
 
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @MappedSuperclass
-public class BackupStorageAO {
-	@Id
-	@Column
-	private String uuid;
-
-	@Column
+public class BackupStorageAO extends ResourceVO {
+    @Column
     @Index
-	private String name;
+    private String name;
 
-	@Column
-	private String url;
+    @Column
+    private String url;
 
-	@Column
-	private String description;
+    @Column
+    private String description;
 
-	@Column
-	private long totalCapacity;
+    @Column
+    private long totalCapacity;
 
     @Column
     private long availableCapacity;
 
-	@Column
-	private String type;
+    @Column
+    private String type;
 
-	@Column
-	@Enumerated(EnumType.STRING)
-	private BackupStorageState state;
+    @Column
+    @Enumerated(EnumType.STRING)
+    private BackupStorageState state;
 
-	@Column
-	@Enumerated(EnumType.STRING)
-	private BackupStorageStatus status;
+    @Column
+    @Enumerated(EnumType.STRING)
+    private BackupStorageStatus status;
 
-	@Column
-	private Timestamp createDate;
+    @Column
+    private Timestamp createDate;
 
-	@Column
-	private Timestamp lastOpDate;
+    @Column
+    private Timestamp lastOpDate;
 
-	public BackupStorageAO() {
-	}
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
+    public BackupStorageAO() {
+    }
 
     public long getAvailableCapacity() {
         return availableCapacity;
@@ -55,52 +57,44 @@ public class BackupStorageAO {
         this.availableCapacity = availableCapacity;
     }
 
-    public String getUuid() {
-    	return uuid;
+    public String getName() {
+        return name;
     }
 
-	public void setUuid(String uuid) {
-    	this.uuid = uuid;
+    public void setName(String name) {
+        this.name = name;
     }
 
-	public String getName() {
-    	return name;
+    public String getDescription() {
+        return description;
     }
 
-	public void setName(String name) {
-    	this.name = name;
+    public void setDescription(String description) {
+        this.description = description;
     }
 
-	public String getDescription() {
-    	return description;
+    public long getTotalCapacity() {
+        return totalCapacity;
     }
 
-	public void setDescription(String description) {
-    	this.description = description;
+    public void setTotalCapacity(long totalCapacity) {
+        this.totalCapacity = totalCapacity;
     }
 
-	public long getTotalCapacity() {
-    	return totalCapacity;
+    public String getType() {
+        return type;
     }
 
-	public void setTotalCapacity(long totalCapacity) {
-    	this.totalCapacity = totalCapacity;
+    public void setType(String type) {
+        this.type = type;
     }
 
-	public String getType() {
-    	return type;
+    public BackupStorageState getState() {
+        return state;
     }
 
-	public void setType(String type) {
-    	this.type = type;
-    }
-
-	public BackupStorageState getState() {
-    	return state;
-    }
-
-	public void setState(BackupStorageState state) {
-    	this.state = state;
+    public void setState(BackupStorageState state) {
+        this.state = state;
     }
 
     public Timestamp getCreateDate() {
@@ -120,11 +114,11 @@ public class BackupStorageAO {
     }
 
     public String getUrl() {
-    	return url;
+        return url;
     }
 
-	public void setUrl(String url) {
-    	this.url = url;
+    public void setUrl(String url) {
+        this.url = url;
     }
 
     public BackupStorageStatus getStatus() {
@@ -134,4 +128,5 @@ public class BackupStorageAO {
     public void setStatus(BackupStorageStatus status) {
         this.status = status;
     }
+
 }

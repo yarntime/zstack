@@ -16,12 +16,15 @@ import javax.persistence.Table;
 @EO(EOClazz = BackupStorageEO.class, needView = false)
 @AutoDeleteTag
 public class SftpBackupStorageVO extends BackupStorageVO {
+
     @Column
     private String hostname;
     @Column
     private String username;
     @Column
     private String password;
+    @Column
+    private int sshPort;
 
     public SftpBackupStorageVO() {
     }
@@ -45,10 +48,18 @@ public class SftpBackupStorageVO extends BackupStorageVO {
     public void setUsername(String username) {
         this.username = username;
     }
+
     public String getPassword() {
-        return password;
+        return this.password;
     }
+
     public void setPassword(String password) {
         this.password = password;
+    }
+    public int getSshPort() {
+        return sshPort;
+    }
+    public void setSshPort(int sshPort) {
+        this.sshPort = sshPort;
     }
 }

@@ -1,11 +1,21 @@
 package org.zstack.header.cluster;
 
+import org.springframework.http.HttpMethod;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * Created by frank on 6/14/2015.
  */
+@RestRequest(
+        path = "/clusters/{uuid}/actions",
+        responseClass = APIUpdateClusterEvent.class,
+        isAction = true,
+        method = HttpMethod.PUT
+)
 public class APIUpdateClusterMsg extends APIMessage implements ClusterMessage {
     @APIParam(resourceType = ClusterVO.class)
     private String uuid;
@@ -42,4 +52,25 @@ public class APIUpdateClusterMsg extends APIMessage implements ClusterMessage {
     public String getClusterUuid() {
         return uuid;
     }
+ 
+    public static APIUpdateClusterMsg __example__() {
+        APIUpdateClusterMsg msg = new APIUpdateClusterMsg();
+        msg.setUuid(uuid());
+        msg.setName("cluster1");
+        msg.setDescription("test");
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                ntfy("Updated").resource(uuid, ClusterVO.class.getSimpleName())
+                        .messageAndEvent(that, evt).done();
+            }
+        };
+    }
+
 }

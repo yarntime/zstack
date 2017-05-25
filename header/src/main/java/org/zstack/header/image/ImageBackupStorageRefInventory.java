@@ -5,7 +5,6 @@ import org.zstack.header.query.ExpandedQuery;
 import org.zstack.header.rest.APINoSee;
 import org.zstack.header.search.Inventory;
 import org.zstack.header.storage.backup.BackupStorageInventory;
-import org.zstack.header.storage.primary.ImageCacheInventory;
 
 import java.io.Serializable;
 import java.sql.Timestamp;
@@ -28,6 +27,7 @@ public class ImageBackupStorageRefInventory implements Serializable {
     private String imageUuid;
     private String backupStorageUuid;
     private String installPath;
+    private String status;
     private Timestamp createDate;
     private Timestamp lastOpDate;
 
@@ -39,6 +39,7 @@ public class ImageBackupStorageRefInventory implements Serializable {
         inv.setCreateDate(vo.getCreateDate());
         inv.setLastOpDate(vo.getLastOpDate());
         inv.setId(vo.getId());
+        inv.setStatus(vo.getStatus().toString());
         return inv;
     }
 
@@ -48,6 +49,14 @@ public class ImageBackupStorageRefInventory implements Serializable {
             invs.add(valueOf(vo));
         }
         return invs;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public long getId() {

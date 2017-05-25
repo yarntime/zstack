@@ -1,6 +1,8 @@
 package org.zstack.network.service.vip;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
 /**
  *@apiResult
  * api event for message :ref:`APICreateVipMsg`
@@ -27,6 +29,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse(allTo = "inventory")
 public class APICreateVipEvent extends APIEvent {
     /**
      * @desc see :ref:`VipInventory`
@@ -48,4 +51,22 @@ public class APICreateVipEvent extends APIEvent {
     public void setInventory(VipInventory inventory) {
         this.inventory = inventory;
     }
+ 
+    public static APICreateVipEvent __example__() {
+        APICreateVipEvent event = new APICreateVipEvent();
+        VipInventory inventory = new VipInventory();
+        inventory.setName("vip1");
+        inventory.setL3NetworkUuid(uuid());
+        inventory.setUuid(uuid());
+        inventory.setGateway("127.0.0.1");
+        inventory.setNetmask("255.255.0.0");
+        inventory.setIp("192.168.0.1");
+        inventory.setIpRangeUuid(uuid());
+        inventory.setPeerL3NetworkUuid(uuid());
+        inventory.setState("enable");
+
+        event.setInventory(inventory);
+        return event;
+    }
+
 }

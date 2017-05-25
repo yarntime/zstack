@@ -1,6 +1,7 @@
 package org.zstack.header.tag;
 
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
@@ -11,6 +12,7 @@ import java.sql.Timestamp;
 public class TagAO {
     @Id
     @Column
+    @Index
     private String uuid;
 
     @Column
@@ -35,6 +37,11 @@ public class TagAO {
 
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public TagAO(TagAO other) {
         this.uuid = other.uuid;

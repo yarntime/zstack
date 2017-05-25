@@ -7,9 +7,9 @@ import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.SQLBatchWithReturn;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
-import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.core.job.Job;
 import org.zstack.core.job.JobContext;
 import org.zstack.header.configuration.InstanceOfferingVO;
@@ -18,8 +18,10 @@ import org.zstack.header.image.ImagePlatform;
 import org.zstack.header.image.ImageVO;
 import org.zstack.header.image.ImageVO_;
 import org.zstack.header.message.MessageReply;
-import org.zstack.header.message.NeedReplyMessage;
-import org.zstack.header.vm.*;
+import org.zstack.header.vm.VmInstanceConstant;
+import org.zstack.header.vm.VmInstanceSequenceNumberVO;
+import org.zstack.header.vm.VmInstanceState;
+import org.zstack.header.vm.VmInstanceVO;
 import org.zstack.identity.AccountManager;
 import org.zstack.tag.TagManager;
 import org.zstack.utils.Utils;
@@ -27,28 +29,27 @@ import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class CreateApplianceVmJob implements Job {
-	protected static final CLogger logger = Utils.getLogger(CreateApplianceVmJob.class);
+    protected static final CLogger logger = Utils.getLogger(CreateApplianceVmJob.class);
 
-	@JobContext
+    @JobContext
     protected ApplianceVmSpec spec;
 
-	@Autowired
-	protected DatabaseFacade dbf;
-	@Autowired
-	protected CloudBus bus;
     @Autowired
-	private AccountManager acntMgr;
+    protected DatabaseFacade dbf;
+    @Autowired
+    protected CloudBus bus;
+    @Autowired
+    private AccountManager acntMgr;
     @Autowired
     private ApplianceVmFactory apvmFactory;
     @Autowired
     private TagManager tagMgr;
 
-	@Override
-	public void run(final ReturnValueCompletion<Object> complete) {
+    @Override
+    public void run(final ReturnValueCompletion<Object> complete) {
         // if syncCreate is set, the name is the unique id for the vm
         if (spec.isSyncCreate()) {
             SimpleQuery<ApplianceVmVO> q = dbf.createQuery(ApplianceVmVO.class);
@@ -75,8 +76,9 @@ public class CreateApplianceVmJob implements Job {
         avo.setInstanceOfferingUuid(spec.getInstanceOffering().getUuid());
         avo.setState(VmInstanceState.Created);
         avo.setType(ApplianceVmConstant.APPLIANCE_VM_TYPE);
-		avo.setInternalId(dbf.generateSequenceNumber(VmInstanceSequenceNumberVO.class));
+        avo.setInternalId(dbf.generateSequenceNumber(VmInstanceSequenceNumberVO.class));
         avo.setApplianceVmType(spec.getApplianceVmType().toString());
+        avo.setAgentPort(spec.getAgentPort());
 
         SimpleQuery<ImageVO> imgq = dbf.createQuery(ImageVO.class);
         imgq.select(ImageVO_.platform);
@@ -89,11 +91,22 @@ public class CreateApplianceVmJob implements Job {
         avo.setCpuSpeed(iovo.getCpuSpeed());
         avo.setMemorySize(iovo.getMemorySize());
         avo.setAllocatorStrategy(iovo.getAllocatorStrategy());
-		
-		acntMgr.createAccountResourceRef(spec.getAccountUuid(), avo.getUuid(), VmInstanceVO.class);
 
         ApplianceVmSubTypeFactory factory = apvmFactory.getApplianceVmSubTypeFactory(avo.getApplianceVmType());
-        avo = factory.persistApplianceVm(spec, avo);
+
+        ApplianceVmVO finalAvo1 = avo;
+        avo = new SQLBatchWithReturn<ApplianceVmVO>() {
+            @Override
+            protected ApplianceVmVO scripts() {
+                ApplianceVmVO vo = factory.persistApplianceVm(spec, finalAvo1);
+                dbf.getEntityManager().flush();
+                dbf.getEntityManager().refresh(vo);
+
+                acntMgr.createAccountResourceRef(spec.getAccountUuid(), vo.getUuid(), VmInstanceVO.class);
+
+                return vo;
+            }
+        }.execute();
 
         tagMgr.copySystemTag(iovo.getUuid(), InstanceOfferingVO.class.getSimpleName(), avo.getUuid(), VmInstanceVO.class.getSimpleName());
         if (spec.getInherentSystemTags() != null && !spec.getInherentSystemTags().isEmpty()) {
@@ -103,33 +116,33 @@ public class CreateApplianceVmJob implements Job {
             tagMgr.createNonInherentSystemTags(spec.getNonInherentSystemTags(), avo.getUuid(), VmInstanceVO.class.getSimpleName());
         }
 
-		final ApplianceVmInventory inv = ApplianceVmInventory.valueOf(avo);
-		StartNewCreatedApplianceVmMsg msg = new StartNewCreatedApplianceVmMsg();
+        final ApplianceVmInventory inv = ApplianceVmInventory.valueOf(avo);
+        StartNewCreatedApplianceVmMsg msg = new StartNewCreatedApplianceVmMsg();
         List<String> nws = new ArrayList<String>();
         nws.add(spec.getManagementNic().getL3NetworkUuid());
         for (ApplianceVmNicSpec nicSpec : spec.getAdditionalNics()) {
             nws.add(nicSpec.getL3NetworkUuid());
         }
-		msg.setL3NetworkUuids(nws);
-		msg.setVmInstanceInventory(inv);
+        msg.setL3NetworkUuids(nws);
+        msg.setVmInstanceInventory(inv);
         msg.setApplianceVmSpec(spec);
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, inv.getUuid());
         final ApplianceVmVO finalAvo = avo;
         bus.send(msg, new CloudBusCallBack(complete) {
-			@Override
-			public void run(MessageReply reply) {
-				if (reply.isSuccess()) {
-					logger.debug(String.format("successfully created appliance vm[uuid:%s, name: %s, appliance vm type: %s]", inv.getUuid(), inv.getName(), inv.getApplianceVmType()));
+            @Override
+            public void run(MessageReply reply) {
+                if (reply.isSuccess()) {
+                    logger.debug(String.format("successfully created appliance vm[uuid:%s, name: %s, appliance vm type: %s]", inv.getUuid(), inv.getName(), inv.getApplianceVmType()));
                     ApplianceVmVO apvo = dbf.findByUuid(finalAvo.getUuid(), ApplianceVmVO.class);
-					ApplianceVmInventory ainv = ApplianceVmInventory.valueOf(apvo);
-					complete.success(ainv);
-				} else {
+                    ApplianceVmInventory ainv = ApplianceVmInventory.valueOf(apvo);
+                    complete.success(ainv);
+                } else {
                     logger.warn(String.format("failed to create appliance vm[uuid:%s, name: %s, appliance vm type: %s], %s", inv.getUuid(), inv.getName(), inv.getApplianceVmType(), reply.getError()));
-					complete.fail(reply.getError());
-				}
-			}
-		});
-	}
+                    complete.fail(reply.getError());
+                }
+            }
+        });
+    }
 
     public ApplianceVmSpec getSpec() {
         return spec;

@@ -4,10 +4,7 @@ import org.zstack.header.Component;
 import org.zstack.header.Service;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudConfigureFailException;
-import org.zstack.header.message.Event;
-import org.zstack.header.message.Message;
-import org.zstack.header.message.MessageReply;
-import org.zstack.header.message.NeedReplyMessage;
+import org.zstack.header.message.*;
 
 import java.util.List;
 
@@ -18,10 +15,13 @@ public interface CloudBus extends Component {
     
     void send(NeedReplyMessage msg, CloudBusCallBack callback);
 
+    @Deprecated
     void send(List<? extends NeedReplyMessage> msgs, CloudBusListCallBack callBack);
 
+    @Deprecated
     void send(List<? extends NeedReplyMessage> msgs, int parallelLevel, CloudBusListCallBack callBack);
 
+    @Deprecated
     void send(List<? extends NeedReplyMessage> msgs, int parallelLevel, CloudBusSteppingCallback callback);
 
     void route(List<Message> msgs);
@@ -65,4 +65,10 @@ public interface CloudBus extends Component {
     String makeTargetServiceIdByResourceUuid(String serviceId, String resourceUuid);
 
     void makeTargetServiceIdByResourceUuid(Message msg, String serviceId, String resourceUuid);
+
+    void installBeforeDeliveryMessageInterceptor(BeforeDeliveryMessageInterceptor interceptor, Class<? extends Message>...classes);
+
+    void installBeforeSendMessageInterceptor(BeforeSendMessageInterceptor interceptor, Class<? extends Message>...classes);
+
+    void installBeforePublishEventInterceptor(BeforePublishEventInterceptor interceptor, Class<? extends Event>...classes);
 }

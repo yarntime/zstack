@@ -8,31 +8,30 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.header.identity.*;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * 1. create an account
  * 2. create a group
  * 3. create a user
  * 4. add the user to the group
- *
+ * <p>
  * confirm the all operations success
- *
+ * <p>
  * 5. remove the user from the group
- *
+ * <p>
  * confirm the user is not in the group
- *
+ * <p>
  * 5. add the user back to the group
  * 6. delete the user
- *
+ * <p>
  * confirm the user is not in the group
- *
+ * <p>
  * 7. create another user and add the user in the group
  * 8. delete the group
- *
+ * <p>
  * confirm the user is not in the group
  */
 public class TestIdentity6 {
@@ -43,16 +42,16 @@ public class TestIdentity6 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
         api = new Api();
         api.startServer();
     }
-    
+
     @Test
-    public void test() throws ApiSenderException {
+    public void test() throws ApiSenderException, InterruptedException {
         IdentityCreator creator = new IdentityCreator(api);
         AccountInventory a = creator.createAccount("test", "test");
         UserGroupInventory g = creator.createGroup("test");
@@ -71,11 +70,15 @@ public class TestIdentity6 {
         ref = q.find();
         Assert.assertNull(ref);
 
+        creator.userLogin("test", "test");
         creator.addUserToGroup("test", "test");
         creator.deleteUser("test");
         Assert.assertFalse(dbf.isExist(u.getUuid(), UserVO.class));
         Assert.assertFalse(q.isExists());
-
+        TimeUnit.SECONDS.sleep(2);
+        SimpleQuery<SessionVO> sq = dbf.createQuery(SessionVO.class);
+        sq.add(SessionVO_.userUuid, Op.EQ, u.getUuid());
+        Assert.assertFalse(sq.isExists());
 
         UserInventory user = creator.createUser("user1", "password");
         creator.addUserToGroup("user1", "test");

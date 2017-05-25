@@ -9,10 +9,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.simulator.storage.primary.SimulatorPrimaryStorageDetails;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
@@ -20,6 +17,7 @@ import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.List;
+
 public class TestListPrimaryStorage {
     CLogger logger = Utils.getLogger(TestListPrimaryStorage.class);
     Api api;
@@ -29,7 +27,7 @@ public class TestListPrimaryStorage {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("ZoneManager.xml")
                 .addXml("Simulator.xml").addXml("PrimaryStorageManager.xml").addXml("ConfigurationManager.xml").addXml("AccountManager.xml").build();
@@ -49,7 +47,7 @@ public class TestListPrimaryStorage {
         sp.setTotalCapacity(SizeUnit.TERABYTE.toByte(10));
         sp.setAvailableCapacity(sp.getTotalCapacity());
         sp.setUrl("nfs://simulator/primary/");
-    	ZoneInventory zone = api.createZones(1).get(0);
+        ZoneInventory zone = api.createZones(1).get(0);
         sp.setZoneUuid(zone.getUuid());
         api.createSimulatoPrimaryStorage(10, sp);
         List<PrimaryStorageInventory> invs = api.listPrimaryStorage(null);
@@ -61,7 +59,7 @@ public class TestListPrimaryStorage {
             }
         });
         invs = api.listPrimaryStorage(uuids);
-        for (int i=0; i<uuids.size(); i++) {
+        for (int i = 0; i < uuids.size(); i++) {
             Assert.assertEquals(uuids.get(i), invs.get(i).getUuid());
         }
     }

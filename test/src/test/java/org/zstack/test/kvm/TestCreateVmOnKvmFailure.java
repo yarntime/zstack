@@ -1,5 +1,6 @@
 package org.zstack.test.kvm;
 
+import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
@@ -47,24 +48,31 @@ public class TestCreateVmOnKvmFailure {
         config = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test(expected=ApiSenderException.class)
-	public void test() throws ApiSenderException {
-		ImageInventory iminv = deployer.images.get("TestImage");
-		InstanceOfferingInventory ioinv = deployer.instanceOfferings.get("TestInstanceOffering");
-		L3NetworkInventory l3inv = deployer.l3Networks.get("TestL3Network1");
-		APICreateVmInstanceMsg msg = new APICreateVmInstanceMsg();
-		msg.setImageUuid(iminv.getUuid());
-		msg.setInstanceOfferingUuid(ioinv.getUuid());
-		List<String> l3uuids = new ArrayList<String>();
-		l3uuids.add(l3inv.getUuid());
-		msg.setL3NetworkUuids(l3uuids);
-		msg.setName("TestVm");
-		msg.setSession(session);
-		msg.setServiceId(ApiMediatorConstant.SERVICE_ID);
-		msg.setType(VmInstanceConstant.USER_VM_TYPE);
-		config.startVmSuccess = false;
-		ApiSender sender = api.getApiSender();
-		sender.send(msg, APICreateVmInstanceEvent.class);
-	}
+
+    @Test
+    public void test() throws ApiSenderException {
+        ImageInventory iminv = deployer.images.get("TestImage");
+        InstanceOfferingInventory ioinv = deployer.instanceOfferings.get("TestInstanceOffering");
+        L3NetworkInventory l3inv = deployer.l3Networks.get("TestL3Network1");
+        APICreateVmInstanceMsg msg = new APICreateVmInstanceMsg();
+        msg.setImageUuid(iminv.getUuid());
+        msg.setInstanceOfferingUuid(ioinv.getUuid());
+        List<String> l3uuids = new ArrayList<>();
+        l3uuids.add(l3inv.getUuid());
+        msg.setL3NetworkUuids(l3uuids);
+        msg.setName("TestVm");
+        msg.setSession(session);
+        msg.setServiceId(ApiMediatorConstant.SERVICE_ID);
+        msg.setType(VmInstanceConstant.USER_VM_TYPE);
+        config.startVmSuccess = false;
+        ApiSender sender = api.getApiSender();
+
+        boolean s = false;
+        try {
+            sender.send(msg, APICreateVmInstanceEvent.class);
+        } catch (ApiSenderException e) {
+            s = true;
+        }
+        Assert.assertTrue(s);
+    }
 }

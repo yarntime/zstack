@@ -7,18 +7,18 @@ public class APIEvent extends Event {
     /**
      * @ignore
      */
-	public static final String API_EVENT = "API_EVENT";
+    public static final String API_EVENT = "API_EVENT";
 
     /**
      * @ignore
      */
-	@APINoSee
+    @APINoSee
     @NoJsonSchema
     private Type type = null;
     /**
      * @ignore
      */
-	@APINoSee
+    @APINoSee
     protected final String apiId;
     /**
      * @desc indicate the failure or success. Client should evaluate this field before evaluating
@@ -30,7 +30,7 @@ public class APIEvent extends Event {
      * @desc indicate the reason of api failure. It presents only if success = false
      * @nullable
      */
-    @NoJsonSchema
+    @NeedJsonSchema
     protected ErrorCode error;
 
     @Override
@@ -40,40 +40,47 @@ public class APIEvent extends Event {
         }
         return type;
     }
-    
+
     public APIEvent() {
         apiId = null;
     }
-    
+
     public APIEvent(String apiId) {
-    	this.apiId = apiId;
-    	this.success = true;
+        this.apiId = apiId;
+        this.success = true;
     }
 
-	public String getApiId() {
-    	return apiId;
+    public String getApiId() {
+        return apiId;
     }
 
-	public boolean isSuccess() {
-    	return success;
+    public boolean isSuccess() {
+        return success;
     }
 
-	public void setSuccess(boolean isSuccess) {
-    	this.success = isSuccess;
+    public void setSuccess(boolean isSuccess) {
+        this.success = isSuccess;
     }
 
-	
-	public ErrorCode getErrorCode() {
-    	return error;
+    public ErrorCode getError() {
+        return error;
     }
 
-	public void setErrorCode(ErrorCode errorCode) {
-	    this.success = false;
-    	this.error = errorCode;
+    public void setError(ErrorCode errorCode) {
+        this.success = false;
+        this.error = errorCode;
     }
 
-	@Override
+    @Override
     public final String getSubCategory() {
-	    return API_EVENT;
+        return API_EVENT;
     }
+ 
+    public static APIEvent __example__() {
+        APIEvent event = new APIEvent();
+
+
+        return event;
+    }
+
 }

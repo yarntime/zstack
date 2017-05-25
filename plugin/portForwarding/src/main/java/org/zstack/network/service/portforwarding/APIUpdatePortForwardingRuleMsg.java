@@ -1,13 +1,24 @@
 package org.zstack.network.service.portforwarding;
 
+import org.springframework.http.HttpMethod;
+import org.springframework.security.access.method.P;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * Created by frank on 6/15/2015.
  */
 @Action(category = PortForwardingConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/port-forwarding/{uuid}/actions",
+        method = HttpMethod.PUT,
+        responseClass = APIUpdatePortForwardingRuleEvent.class,
+        isAction = true
+)
 public class APIUpdatePortForwardingRuleMsg extends APIMessage {
     @APIParam(resourceType = PortForwardingRuleVO.class, checkAccount = true, operationTarget = true)
     private String uuid;
@@ -39,4 +50,27 @@ public class APIUpdatePortForwardingRuleMsg extends APIMessage {
     public void setDescription(String description) {
         this.description = description;
     }
+ 
+    public static APIUpdatePortForwardingRuleMsg __example__() {
+        APIUpdatePortForwardingRuleMsg msg = new APIUpdatePortForwardingRuleMsg();
+        msg.setUuid(uuid());
+        msg.setName("pf2");
+        msg.setDescription("new rule");
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Updated").resource(uuid, PortForwardingRuleVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

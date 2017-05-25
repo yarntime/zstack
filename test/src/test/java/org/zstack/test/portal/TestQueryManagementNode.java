@@ -5,21 +5,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.Platform;
 import org.zstack.core.componentloader.ComponentLoader;
-import org.zstack.header.host.APIQueryHostMsg;
-import org.zstack.header.host.APIQueryHostReply;
 import org.zstack.header.managementnode.APIQueryManagementNodeMsg;
 import org.zstack.header.managementnode.APIQueryManagementNodeReply;
 import org.zstack.header.managementnode.ManagementNodeInventory;
 import org.zstack.header.query.QueryCondition;
-import org.zstack.portal.managementnode.ManagementNode;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.test.search.QueryTestValidator;
-import org.zstack.utils.DebugUtils;
 
 import java.util.ArrayList;
+import java.util.Map;
 
 /**
  */
@@ -30,7 +24,7 @@ public class TestQueryManagementNode {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         con.addXml("PortalForUnitTest.xml");
         con.addXml("AccountManager.xml");
         loader = con.build();
@@ -49,5 +43,14 @@ public class TestQueryManagementNode {
         msg.setConditions(new ArrayList<QueryCondition>());
         APIQueryManagementNodeReply reply = api.query(msg, APIQueryManagementNodeReply.class);
         Assert.assertEquals(1, reply.getInventories().size());
+
+        String version = api.getVersion();
+        Assert.assertNotNull(version);
+        System.out.println(String.format("version: %s", version));
+
+        Map<String, Long> currentTime = api.getCurrentTime();
+        Assert.assertNotNull(currentTime.get("MillionSeconds"));
+        Assert.assertNotNull(currentTime.get("Seconds"));
+        System.out.println(String.format("current time in million seconds: %d", currentTime.get("MillionSeconds")));
     }
 }

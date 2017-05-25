@@ -1,6 +1,8 @@
 package org.zstack.storage.backup.sftp;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.storage.backup.APIAddBackupStorageMsg;
 /**
  * @api
@@ -16,8 +18,9 @@ import org.zstack.header.storage.backup.APIAddBackupStorageMsg;
  * {
 "org.zstack.storage.backup.sftp.APIAddSftpBackupStorageMsg": {
 "hostname": "localhost",
-"username": "root",
+"username": "username",
 "password": "password",
+"port": "port",
 "url": "nfs://test",
 "name": "sftp",
 "type": "SftpBackupStorage",
@@ -31,8 +34,9 @@ import org.zstack.header.storage.backup.APIAddBackupStorageMsg;
  * {
 "org.zstack.storage.backup.sftp.APIAddSftpBackupStorageMsg": {
 "hostname": "localhost",
-"username": "root",
+"username": "username",
 "password": "password",
+"port": "port",
 "url": "nfs://test",
 "name": "sftp",
 "type": "SftpBackupStorage",
@@ -49,13 +53,24 @@ import org.zstack.header.storage.backup.APIAddBackupStorageMsg;
  *
  * see :ref:`APIAddBackupStorageEvent`
  */
+
+@RestRequest(
+        path = "/backup-storage/sftp",
+        method = HttpMethod.POST,
+        responseClass = APIAddSftpBackupStorageEvent.class,
+        parameterName = "params"
+)
 public class APIAddSftpBackupStorageMsg extends APIAddBackupStorageMsg {
-    @APIParam(maxLength = 255)
+    @APIParam(maxLength = 255, emptyString = false)
     private String hostname;
     @APIParam(maxLength = 255)
     private String username;
     @APIParam(maxLength = 255)
     private String password;
+    @APIParam(numberRange = {1, 65535}, required = false)
+    private int sshPort = 22;
+
+
 
     @Override
     public String getType() {
@@ -80,4 +95,24 @@ public class APIAddSftpBackupStorageMsg extends APIAddBackupStorageMsg {
     public void setPassword(String password) {
         this.password = password;
     }
+    public int getSshPort() {
+        return sshPort;
+    }
+
+    public void setSshPort(int sshPort) {
+        this.sshPort = sshPort;
+    }
+
+ 
+    public static APIAddSftpBackupStorageMsg __example__() {
+        APIAddSftpBackupStorageMsg msg = new APIAddSftpBackupStorageMsg();
+        msg.setName("Sftp-Test");
+        msg.setUrl("/data/sftp-data");
+        msg.setHostname("192.168.1.8");
+        msg.setUsername("admin");
+        msg.setPassword("test1234");
+
+        return msg;
+    }
+
 }

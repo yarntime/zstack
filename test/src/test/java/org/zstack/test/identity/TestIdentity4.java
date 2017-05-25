@@ -10,16 +10,13 @@ import org.zstack.header.identity.AccountInventory;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.identity.UserInventory;
 import org.zstack.header.identity.UserVO;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 
 /**
  * 1. create an account
  * 2. create a user
  * 3. reset the password of user
- *
+ * <p>
  * confirm the password reset successfully
  */
 public class TestIdentity4 {
@@ -30,14 +27,14 @@ public class TestIdentity4 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
         api = new Api();
         api.startServer();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         IdentityCreator creator = new IdentityCreator(api);
@@ -51,7 +48,7 @@ public class TestIdentity4 {
         user = dbf.findByUuid(u.getUuid(), UserVO.class);
         Assert.assertEquals("new", user.getPassword());
 
-        UserInventory user2 =  creator.createUser("user2", "password");
+        UserInventory user2 = creator.createUser("user2", "password");
 
         boolean s = false;
         try {

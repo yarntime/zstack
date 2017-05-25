@@ -1,8 +1,12 @@
 package org.zstack.network.service.portforwarding;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.vm.VmNicVO;
 
 /**
@@ -44,6 +48,11 @@ import org.zstack.header.vm.VmNicVO;
  * see :ref:`APIAttachPortForwardingRuleEvent`
  */
 @Action(category = PortForwardingConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/port-forwarding/{ruleUuid}/vm-instances/nics/{vmNicUuid}",
+        method = HttpMethod.POST,
+        responseClass = APIAttachPortForwardingRuleEvent.class
+)
 public class APIAttachPortForwardingRuleMsg extends APIMessage {
     /**
      * @desc rule uuid
@@ -71,4 +80,26 @@ public class APIAttachPortForwardingRuleMsg extends APIMessage {
     public void setVmNicUuid(String vmNicUuid) {
         this.vmNicUuid = vmNicUuid;
     }
+ 
+    public static APIAttachPortForwardingRuleMsg __example__() {
+        APIAttachPortForwardingRuleMsg msg = new APIAttachPortForwardingRuleMsg();
+        msg.setVmNicUuid(uuid());
+        msg.setRuleUuid(uuid());
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Attached port forwarding Rule[uuid:%s]",ruleUuid).resource(vmNicUuid,VmNicVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

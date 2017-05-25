@@ -62,7 +62,7 @@ public class TestSnapshotOnKvm35 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -91,8 +91,8 @@ public class TestSnapshotOnKvm35 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test
-	public void test() throws ApiSenderException {
+    @Test
+    public void test() throws ApiSenderException {
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         VolumeInventory dataVol = CollectionUtils.find(vm.getAllVolumes(), new Function<VolumeInventory, VolumeInventory>() {
             @Override
@@ -108,7 +108,7 @@ public class TestSnapshotOnKvm35 {
 
         String volUuid = dataVol.getUuid();
         VolumeSnapshotInventory inv = api.createSnapshot(volUuid);
-        VolumeSnapshotInventory  root = inv;
+        VolumeSnapshotInventory root = inv;
         fullSnapshot(inv, 0);
 
         inv = api.createSnapshot(volUuid);

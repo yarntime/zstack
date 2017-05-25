@@ -2,41 +2,36 @@ package org.zstack.header.storage.snapshot;
 
 import org.zstack.header.message.MessageReply;
 
-import java.util.List;
-
 /**
  */
 public class CreateTemplateFromVolumeSnapshotReply extends MessageReply {
-    public static class CreateTemplateFromVolumeSnapshotResult {
-        private String backupStorageUuid;
-        private String installPath;
-
-        public String getBackupStorageUuid() {
-            return backupStorageUuid;
-        }
-
-        public void setBackupStorageUuid(String backupStorageUuid) {
-            this.backupStorageUuid = backupStorageUuid;
-        }
-
-        public String getInstallPath() {
-            return installPath;
-        }
-
-        public void setInstallPath(String installPath) {
-            this.installPath = installPath;
-        }
-    }
-
+    private long actualSize;
     private long size;
-    private List<CreateTemplateFromVolumeSnapshotResult> results;
+    private String backupStorageUuid;
+    private String backupStorageInstallPath;
 
-    public List<CreateTemplateFromVolumeSnapshotResult> getResults() {
-        return results;
+    public String getBackupStorageUuid() {
+        return backupStorageUuid;
     }
 
-    public void setResults(List<CreateTemplateFromVolumeSnapshotResult> results) {
-        this.results = results;
+    public void setBackupStorageUuid(String backupStorageUuid) {
+        this.backupStorageUuid = backupStorageUuid;
+    }
+
+    public String getBackupStorageInstallPath() {
+        return backupStorageInstallPath;
+    }
+
+    public void setBackupStorageInstallPath(String backupStorageInstallPath) {
+        this.backupStorageInstallPath = backupStorageInstallPath;
+    }
+
+    public long getActualSize() {
+        return actualSize;
+    }
+
+    public void setActualSize(long actualSize) {
+        this.actualSize = actualSize;
     }
 
     public long getSize() {

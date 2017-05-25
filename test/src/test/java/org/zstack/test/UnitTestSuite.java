@@ -6,18 +6,21 @@ import org.junit.Test;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.test.UnitTestSuiteConfig.Import;
 import org.zstack.test.UnitTestSuiteConfig.TestCase;
-import org.zstack.utils.*;
+import org.zstack.utils.DebugUtils;
+import org.zstack.utils.ShellResult;
 import org.zstack.utils.ShellUtils.ShellRunner;
+import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Unmarshaller;
-import java.io.*;
-import java.lang.reflect.Field;
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class UnitTestSuite {
     private static CLogger logger = Utils.getLogger(UnitTestSuite.class);
@@ -29,6 +32,7 @@ public class UnitTestSuite {
     private static final String LOG_FOLDER = "logs";
     private static final String ERR_LOG_FOLDER = "errLogs";
     private static final String SUMMARY = "summary";
+    private static final String TIME_SUMMARY = "time";
     private static final String RERUN_FAILURE_CASE = "rerunFailures";
     private static final int DOT_LEN = 50;
     private static int maxCaseNameLen;
@@ -41,10 +45,16 @@ public class UnitTestSuite {
         private long timeout;
         private int index;
         private boolean isFailedByTimeout;
+        private int timeCost;
 
         String caseNameWithIndex() {
             return String.format("%s.%s", index, clazz.getSimpleName());
         }
+    }
+
+    private enum Action {
+        RUN_CASES,
+        LIST_CASES
     }
 
     private class TestSuite {
@@ -52,10 +62,14 @@ public class UnitTestSuite {
         private List<UnitTestSuiteConfig> suiteConfigs = new ArrayList<UnitTestSuiteConfig>();
         private List<CaseInfo> testCases = new ArrayList<CaseInfo>();
         private File errLogFolder;
+        private Action action;
 
         private void parseUnitTestSuiteConfig(String configPath) throws JAXBException {
             Unmarshaller unmarshaller = context.createUnmarshaller();
-            UnitTestSuiteConfig config = (UnitTestSuiteConfig) unmarshaller.unmarshal(PathUtil.findFileOnClassPath(configPath, true));
+            //UnitTestSuiteConfig config = (UnitTestSuiteConfig) unmarshaller.unmarshal(PathUtil.findFileOnClassPath(configPath, true));
+            logger.debug(String.format("parsing unit test suite configuration[%s]", configPath));
+            File f = PathUtil.findFileOnClassPath(configPath, true);
+            UnitTestSuiteConfig config = (UnitTestSuiteConfig) unmarshaller.unmarshal(f);
             suiteConfigs.add(config);
             for (Import imp : config.getImport()) {
                 parseUnitTestSuiteConfig(imp.getResource());
@@ -76,6 +90,13 @@ public class UnitTestSuite {
 
             logger.info(String.format("use configure file: %s", configPath));
 
+            String listCases = System.getProperty("list");
+            if (listCases != null) {
+                action = Action.LIST_CASES;
+            } else {
+                action = Action.RUN_CASES;
+            }
+
             context = JAXBContext.newInstance("org.zstack.test");
             parseUnitTestSuiteConfig(configPath);
             parseTestCases();
@@ -87,7 +108,7 @@ public class UnitTestSuite {
                 }
 
                 String[] caseNames = cases.split(",");
-                DebugUtils.Assert(caseNames.length!=0, String.format("cases cannot be an empty string"));
+                DebugUtils.Assert(caseNames.length != 0, String.format("cases cannot be an empty string"));
                 List<CaseInfo> casesToRun = new ArrayList<CaseInfo>();
                 for (String caseName : caseNames) {
                     CaseInfo info = caseMap.get(caseName);
@@ -121,8 +142,10 @@ public class UnitTestSuite {
                     } catch (ClassNotFoundException e) {
                         String err = String.format("Unable to find unit test class[%s], please remove it from UnitTestSuiteConfig.xml or create this unit test case",
                                 c.getClazz());
-                        throw new CloudRuntimeException(err, e);
+                        logger.warn(err);
+                        continue;
                     }
+
                     String simpleName = clazz.getSimpleName();
                     if (simpleName.length() > maxCaseNameLen) {
                         maxCaseNameLen = simpleName.length();
@@ -135,7 +158,7 @@ public class UnitTestSuite {
                     testCases.add(info);
 
                     if (c.getRepeatTimes() != null && c.getRepeatTimes() > 1) {
-                        for (int i=0; i<c.getRepeatTimes(); i++) {
+                        for (int i = 0; i < c.getRepeatTimes(); i++) {
                             info = new CaseInfo();
                             info.clazz = clazz;
                             info.timeout = parseCaseTimeout(c, config);
@@ -165,7 +188,7 @@ public class UnitTestSuite {
 
             int index = 0;
             for (CaseInfo info : testCases) {
-                info.index = index ++;
+                info.index = index++;
                 CaseRunner runner = new CaseRunner();
                 runner.caseInfo = info;
                 try {
@@ -218,7 +241,7 @@ public class UnitTestSuite {
             List<String> failedCaseNames = new ArrayList<String>();
             for (CaseInfo info : testCases) {
                 if (!info.done) {
-                    skipped ++;
+                    skipped++;
                     continue;
                 }
 
@@ -244,7 +267,7 @@ public class UnitTestSuite {
 
             f.format("\n\nTest Summary:\n-------------------------------------------------------------------------------");
             String fmt = "\nTotal cases: %s\tSuccess: %s\tFailed: %s\tSkipped: %s\tPass rate: %s%%";
-            f.format(fmt, testCases.size(), successCases, failedCases, skipped, successRate*100);
+            f.format(fmt, testCases.size(), successCases, failedCases, skipped, successRate * 100);
             if (failedCases > 0) {
                 f.format("\n\nsee error logs in %s", errLogFolder.getAbsolutePath());
             }
@@ -264,7 +287,21 @@ public class UnitTestSuite {
 
         private void generateReport() throws IOException {
             mergeErrorCaseLog();
+            generateTimeSummary();
             generateSummary();
+        }
+
+
+        private void generateTimeSummary() throws IOException {
+            List<String> timeCosts = new ArrayList<>();
+            for (CaseInfo info : testCases) {
+                timeCosts.add(String.format("%s.java %s", info.clazz.getSimpleName(), info.timeCost));
+            }
+
+            FileUtils.writeStringToFile(
+                    new File(PathUtil.join(REPORT_FOLDER, TIME_SUMMARY)),
+                    StringUtils.join(timeCosts, "\n")
+            );
         }
 
         void run() throws Exception {
@@ -278,12 +315,28 @@ public class UnitTestSuite {
                     }
                 }
             }));
+
             parse();
-            prepareLogFolder();
-            runCases();
+
+            if (action == Action.LIST_CASES) {
+                listCases();
+            } else if (action == Action.RUN_CASES) {
+                prepareLogFolder();
+                runCases();
+            }
+        }
+
+        private void listCases() throws IOException {
+            List<String> caseNames = testCases.stream().map(info -> info.clazz.getSimpleName()).collect(Collectors.toList());
+            String listCases = System.getProperty("list").trim();
+            if (listCases.isEmpty()) {
+                System.out.println(StringUtils.join(caseNames, "\n"));
+            } else {
+                FileUtils.writeStringToFile(new File(listCases), StringUtils.join(caseNames, "\n"));
+            }
         }
     }
-    
+
     private String colorResult(boolean ret) {
         return ret ? String.format(ANSI_GREEN + "Success" + ANSI_RESET) : String.format(ANSI_RED + "Failure" + ANSI_RESET);
     }
@@ -295,6 +348,11 @@ public class UnitTestSuite {
         Thread progressBar;
 
         void run() throws IOException, NoSuchFieldException, IllegalAccessException, InterruptedException {
+            if (caseInfo.clazz.isAnnotationPresent(Deprecated.class)) {
+                System.out.print(String.format("Skip deprecated case: %s", caseInfo.clazz.getSimpleName()));
+                return;
+            }
+
             startProgressBar();
             startTimeoutMonitor();
             shellRunner = new ShellRunner();
@@ -333,12 +391,12 @@ public class UnitTestSuite {
                 }
 
                 private String formatSeconds() {
-                    return String.format("%02d:%02d", (seconds%3600)/60, (seconds%60));
+                    return String.format("%02d:%02d", (seconds % 3600) / 60, (seconds % 60));
                 }
 
                 private int printBar() {
                     String fmt = String.format("\r%%-%ss%s%s [ %s ]", maxCaseNameLen, StringUtils.repeat(".", dotLen),
-                            StringUtils.repeat(" ", DOT_LEN - dotLen),  formatSeconds());
+                            StringUtils.repeat(" ", DOT_LEN - dotLen), formatSeconds());
                     String str = String.format(fmt, caseInfo.caseNameWithIndex());
                     System.out.print(str);
                     return str.length();
@@ -364,6 +422,7 @@ public class UnitTestSuite {
                         }
                         String fmt = "\r%-" + maxCaseNameLen + "s" + StringUtils.repeat(".", DOT_LEN) + String.format(" [ %%-7s %s ]", formatSeconds());
                         System.out.println(String.format(fmt, caseInfo.caseNameWithIndex(), colorResult(caseInfo.success)));
+                        caseInfo.timeCost = seconds;
                     } catch (Exception e) {
                         logger.warn(e.getMessage(), e);
                     }

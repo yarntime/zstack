@@ -2,6 +2,7 @@ package org.zstack.test.eip;
 
 import junit.framework.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
@@ -26,30 +27,31 @@ import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
 import org.zstack.test.identity.IdentityCreator;
-import org.zstack.test.search.QueryTestValidator;
 
 import java.util.ArrayList;
 
 /**
  * 1. create a user
  * 2. assign permissions of allow of creating/changing/updating/attaching/detaching/deleting eip to the user
- *
+ * <p>
  * confirm the user can do those operations
- *
+ * <p>
  * 3. assign permissions of deny of creating/changing/updating/attaching/detaching/deleting eip to the user
- *
+ * <p>
  * confirm the user cannot do those operations
- *
+ * <p>
  * 4. create a user added in a group
  * 5. assign permissions of allow of creating/changing/updating/attaching/detaching/deleting eip to the group
- *
+ * <p>
  * confirm the user can do those operations
- *
+ * <p>
  * 6. assign permissions of deny of creating/changing/updating/attaching/detaching/deleting eip to the group
- *
+ * <p>
  * confirm the user cannot do those operations
- *
  */
+@Ignore
+@Deprecated
+// New Groovy Case : TestPolicyForEip.groovy
 public class TestPolicyForEip {
     Deployer deployer;
     Api api;
@@ -84,7 +86,7 @@ public class TestPolicyForEip {
         VipInventory vip = api.acquireIp(l3Uuid, session);
         return api.createEip("eip", vip.getUuid(), nicUuid, session);
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         L3NetworkInventory l3 = deployer.l3Networks.get("PublicNetwork");

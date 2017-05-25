@@ -38,7 +38,7 @@ public class TestDataVolumeGetCandidateVm1 {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         DiskOfferingInventory dinv = deployer.diskOfferings.get("TestDataDiskOffering");
@@ -62,6 +62,10 @@ public class TestDataVolumeGetCandidateVm1 {
         VolumeInventory account1Data1 = api.createDataVolume("account1-data1", dinv.getUuid(), session1);
         vms = api.getDataVolumeCandidateVmForAttaching(account1Data1.getUuid(), session1);
         Assert.assertEquals(1, vms.size());
+
+        api.attachVolumeToVm(vms.get(0).getUuid(), account1Data1.getUuid());
+        vms = api.getDataVolumeCandidateVmForAttaching(account1Data1.getUuid(), session1);
+        Assert.assertEquals(0, vms.size());
 
         // for admin
         VolumeInventory adminData1 = api.createDataVolume("admin-data1", dinv.getUuid());

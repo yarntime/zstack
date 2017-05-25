@@ -1,8 +1,12 @@
 package org.zstack.network.service.portforwarding;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * @api
@@ -40,6 +44,11 @@ import org.zstack.header.message.APIParam;
  * see :ref:`APIDetachPortForwardingRuleEvent`
  */
 @Action(category = PortForwardingConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/port-forwarding/{uuid}/vm-instances/nics",
+        method = HttpMethod.DELETE,
+        responseClass = APIDetachPortForwardingRuleEvent.class
+)
 public class APIDetachPortForwardingRuleMsg extends APIMessage {
     /**
      * @desc rule uuid
@@ -54,4 +63,25 @@ public class APIDetachPortForwardingRuleMsg extends APIMessage {
     public void setUuid(String uuid) {
         this.uuid = uuid;
     }
+ 
+    public static APIDetachPortForwardingRuleMsg __example__() {
+        APIDetachPortForwardingRuleMsg msg = new APIDetachPortForwardingRuleMsg();
+        msg.setUuid(uuid());
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Detached").resource(uuid,PortForwardingRuleVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

@@ -20,17 +20,23 @@ import org.zstack.header.storage.backup.BackupStorageVO_;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.kvm.KVMAgentCommands;
 import org.zstack.storage.ceph.primary.CephPrimaryStorageBase.*;
+import org.zstack.storage.ceph.primary.CephPrimaryStorageMonBase.PingCmd;
+import org.zstack.storage.ceph.primary.CephPrimaryStorageMonBase.PingRsp;
 import org.zstack.storage.ceph.primary.CephPrimaryStorageSimulatorConfig.CephPrimaryStorageConfig;
+import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
+import org.zstack.utils.logging.CLogger;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by frank on 7/28/2015.
  */
 @Controller
 public class CephPrimaryStorageSimulator {
+    CLogger logger = Utils.getLogger(CephPrimaryStorageSimulator.class);
     @Autowired
     private DatabaseFacade dbf;
     @Autowired
@@ -66,6 +72,25 @@ public class CephPrimaryStorageSimulator {
         return c;
     }
 
+    @RequestMapping(value= CephPrimaryStorageBase.GET_FACTS, method= RequestMethod.POST)
+    public @ResponseBody
+    String getFacts(HttpEntity<String> entity) {
+        GetFactsCmd cmd = JSONObjectUtil.toObject(entity.getBody(), GetFactsCmd.class);
+        GetFactsRsp rsp = new GetFactsRsp();
+
+        config.getFactsCmds.add(cmd);
+        String fsid = config.getFactsCmdFsid.get(cmd.monUuid);
+        if (fsid == null) {
+            CephPrimaryStorageConfig c = getConfig(cmd);
+            fsid = c.fsid;
+        }
+
+        rsp.fsid = fsid;
+        rsp.monAddr = config.monAddr.get(cmd.monUuid);
+        reply(entity, rsp);
+        return null;
+    }
+
     @RequestMapping(value= CephPrimaryStorageBase.DELETE_POOL_PATH, method= RequestMethod.POST)
     public @ResponseBody
     String deletePool(HttpEntity<String> entity) {
@@ -82,13 +107,38 @@ public class CephPrimaryStorageSimulator {
         CephPrimaryStorageConfig cpc = getConfig(cmd);
 
         InitRsp rsp = new InitRsp();
-        rsp.fsid = cpc.fsid;
-        rsp.userKey = Platform.getUuid();
-        rsp.totalCapacity = cpc.totalCapacity;
-        rsp.availableCapacity = cpc.availCapacity;
+        if (!config.monInitSuccess) {
+            rsp.error = "on purpose";
+            rsp.success = false;
+        } else {
+            rsp.fsid = cpc.fsid;
+            rsp.userKey = Platform.getUuid();
+            rsp.totalCapacity = cpc.totalCapacity;
+            rsp.availableCapacity = cpc.availCapacity;
+        }
+
         reply(entity, rsp);
         return null;
     }
+
+    @RequestMapping(value= CephPrimaryStorageBase.CHECK_POOL_PATH, method= RequestMethod.POST)
+    public @ResponseBody
+    String checkPool(HttpEntity<String> entity) {
+        CheckCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CheckCmd.class);
+        CephPrimaryStorageConfig cpc = getConfig(cmd);
+
+        CheckRsp rsp = new CheckRsp();
+        if (!config.monInitSuccess) {
+            rsp.error = "on purpose";
+            rsp.success = false;
+        } else {
+            rsp.success = true;
+        }
+
+        reply(entity, rsp);
+        return null;
+    }
+
 
     private void setCapacity(AgentCommand cmd, AgentResponse rsp, long size) {
         CephPrimaryStorageConfig cpc = getConfig(cmd);
@@ -96,14 +146,50 @@ public class CephPrimaryStorageSimulator {
         rsp.availableCapacity = cpc.availCapacity + size;
     }
 
+    @RequestMapping(value= CephPrimaryStorageMonBase.PING_PATH, method= RequestMethod.POST)
+    public @ResponseBody
+    String pingMon(HttpEntity<String> entity) {
+        PingCmd cmd = JSONObjectUtil.toObject(entity.getBody(), PingCmd.class);
+        Boolean success = config.pingCmdSuccess.get(cmd.monUuid);
+        PingRsp rsp = new PingRsp();
+        rsp.success = success == null ? true : success;
+        if (!rsp.success) {
+            rsp.error = "on purpose";
+        }
+        rsp.failure = config.pingCmdOperationFailure.get(cmd.monUuid);
+        reply(entity, rsp);
+        return null;
+    }
+
     @RequestMapping(value= CephPrimaryStorageBase.CREATE_VOLUME_PATH, method= RequestMethod.POST)
     public @ResponseBody
-    String createEmptyVolume(HttpEntity<String> entity) {
+    String createEmptyVolume(HttpEntity<String> entity) throws InterruptedException {
+        if (config.synchronizedCreateEmptyVolume) {
+            synchronized (config) {
+                doCreateEmptyVolume(entity);
+            }
+        } else {
+            doCreateEmptyVolume(entity);
+        }
+        return null;
+    }
+
+    String doCreateEmptyVolume(HttpEntity<String> entity) throws InterruptedException {
         CreateEmptyVolumeCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CreateEmptyVolumeCmd.class);
         config.createEmptyVolumeCmds.add(cmd);
 
         CreateEmptyVolumeRsp rsp = new CreateEmptyVolumeRsp();
-        setCapacity(cmd, rsp, -cmd.getSize());
+        //setCapacity(cmd, rsp, -cmd.getSize());
+        for (String path : bitSizeMap.keySet()) {
+            if (!path.equals(cmd.getInstallPath())) {
+                continue;
+            }
+            rsp.error = String.format("File exists[%s]", cmd.getInstallPath());
+            rsp.setSuccess(false);
+            reply(entity, rsp);
+            return null;
+        }
+        TimeUnit.SECONDS.sleep(2);
         bitSizeMap.put(cmd.getInstallPath(), cmd.getSize());
         reply(entity, rsp);
         return null;
@@ -138,7 +224,11 @@ public class CephPrimaryStorageSimulator {
         CreateSnapshotCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CreateSnapshotCmd.class);
         config.createSnapshotCmds.add(cmd);
 
-        reply(entity, new CreateSnapshotRsp());
+        CreateSnapshotRsp rsp = new CreateSnapshotRsp();
+        Long size = config.createSnapshotCmdSize.get(cmd.getVolumeUuid());
+        rsp.setActualSize(size == null ? 0 : size);
+
+        reply(entity, rsp);
         return null;
     }
 
@@ -196,10 +286,31 @@ public class CephPrimaryStorageSimulator {
     @RequestMapping(value= CephPrimaryStorageBase.CP_PATH, method= RequestMethod.POST)
     public @ResponseBody
     String cp(HttpEntity<String> entity) {
+        CpRsp rsp = new CpRsp();
         CpCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CpCmd.class);
         config.cpCmds.add(cmd);
 
-        reply(entity, new CpRsp());
+        Long size = config.cpCmdSize.get(cmd.resourceUuid);
+        rsp.size = size == null ? 0 : size;
+        Long asize = config.cpCmdActualSize.get(cmd.resourceUuid);
+        rsp.actualSize = asize == null ? 0 : asize;
+
+        reply(entity, rsp);
+        return null;
+    }
+
+    @RequestMapping(value= CephPrimaryStorageBase.GET_VOLUME_SIZE_PATH, method= RequestMethod.POST)
+    public @ResponseBody
+    String getVolumeSize(HttpEntity<String> entity) {
+        GetVolumeSizeCmd cmd = JSONObjectUtil.toObject(entity.getBody(), GetVolumeSizeCmd.class);
+        config.getVolumeSizeCmds.add(cmd);
+
+        Long asize = config.getVolumeSizeCmdActualSize.get(cmd.volumeUuid);
+        GetVolumeSizeRsp rsp = new GetVolumeSizeRsp();
+        rsp.actualSize = asize == null ? 0 : asize;
+        Long size = config.getVolumeSizeCmdSize.get(cmd.volumeUuid);
+        rsp.size = size == null ? 0 : size;
+        reply(entity, rsp);
         return null;
     }
 
@@ -230,6 +341,46 @@ public class CephPrimaryStorageSimulator {
         config.rollbackSnapshotCmds.add(cmd);
 
         reply(entity, new RollbackSnapshotRsp());
+        return null;
+    }
+
+    @RequestMapping(value= CephPrimaryStorageBase.KVM_HA_SETUP_SELF_FENCER, method= RequestMethod.POST)
+    public @ResponseBody
+    String setupSelfFencer(HttpEntity<String> entity) {
+        KvmSetupSelfFencerCmd cmd = JSONObjectUtil.toObject(entity.getBody(), KvmSetupSelfFencerCmd.class);
+        config.kvmSetupSelfFencerCmds.add(cmd);
+        reply(entity, new AgentResponse());
+        return null;
+    }
+
+    @RequestMapping(value= CephPrimaryStorageBase.KVM_HA_CANCEL_SELF_FENCER, method= RequestMethod.POST)
+    public @ResponseBody
+    String cancelSelfFencer(HttpEntity<String> entity) {
+        KvmCancelSelfFencerCmd cmd = JSONObjectUtil.toObject(entity.getBody(), KvmCancelSelfFencerCmd.class);
+        config.kvmCancelSelfFencerCmds.add(cmd);
+        reply(entity, new AgentResponse());
+        return null;
+    }
+
+    @RequestMapping(value= CephPrimaryStorageBase.DELETE_IMAGE_CACHE, method= RequestMethod.POST)
+    public @ResponseBody
+    String deleteImageCache(HttpEntity<String> entity) {
+        DeleteImageCacheCmd cmd = JSONObjectUtil.toObject(entity.getBody(), DeleteImageCacheCmd.class);
+        config.deleteImageCacheCmds.add(cmd);
+        reply(entity, new AgentResponse());
+        return null;
+    }
+
+    @RequestMapping(value= CephPrimaryStorageBase.CHECK_BITS_PATH, method= RequestMethod.POST)
+    public @ResponseBody
+    String checkBitsPath(HttpEntity<String> entity) {
+        CheckIsBitsExistingCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CheckIsBitsExistingCmd.class);
+        config.checkBitsPathCmds.add(cmd);
+
+        CheckIsBitsExistingRsp rsp = new CheckIsBitsExistingRsp();
+        rsp.setExisting(true);
+
+        reply(entity, rsp);
         return null;
     }
 }

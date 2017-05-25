@@ -30,7 +30,7 @@ public class RESTApiController {
     @Autowired
     private RESTFacade restf;
 
-    @RequestMapping(value = RESTConstant.REST_API_RESULT + "{uuid}", method = { RequestMethod.GET, RequestMethod.PUT })
+    @RequestMapping(value = RESTConstant.REST_API_RESULT + "{uuid}", method = {RequestMethod.GET, RequestMethod.PUT})
     public void queryResult(@PathVariable String uuid, HttpServletResponse rsp) throws IOException {
         try {
             RestAPIResponse apiRsp = restApi.getResult(uuid);
@@ -38,7 +38,7 @@ public class RESTApiController {
                 rsp.sendError(HttpStatus.SC_NOT_FOUND, String.format("No api result[uuid:%s] found", uuid));
                 return;
             }
-
+            rsp.setCharacterEncoding("UTF-8");
             PrintWriter writer = rsp.getWriter();
             String res = JSONObjectUtil.toJsonString(apiRsp);
             rsp.setStatus(HttpStatus.SC_OK);
@@ -50,7 +50,13 @@ public class RESTApiController {
     }
 
     private String handleByMessageType(String body) {
-        APIMessage amsg = (APIMessage) RESTApiDecoder.loads(body);
+        APIMessage amsg = null;
+        try {
+            amsg = (APIMessage) RESTApiDecoder.loads(body);
+        } catch (Throwable t) {
+            return t.getMessage();
+        }
+
         RestAPIResponse rsp = null;
         if (amsg instanceof APISyncCallMessage) {
             rsp = restApi.call(amsg);
@@ -60,12 +66,13 @@ public class RESTApiController {
         return JSONObjectUtil.toJsonString(rsp);
     }
 
-    @RequestMapping(value = RESTConstant.REST_API_CALL, method = { RequestMethod.POST, RequestMethod.PUT })
+    @RequestMapping(value = RESTConstant.REST_API_CALL, method = {RequestMethod.POST, RequestMethod.PUT})
     public void post(HttpServletRequest request, HttpServletResponse response) throws IOException {
         HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(request);
         try {
             String ret = handleByMessageType(entity.getBody());
             response.setStatus(HttpStatus.SC_OK);
+            response.setCharacterEncoding("UTF-8");
             PrintWriter writer = response.getWriter();
             writer.write(ret);
         } catch (Throwable t) {

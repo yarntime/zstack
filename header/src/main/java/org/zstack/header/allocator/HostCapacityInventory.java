@@ -13,6 +13,8 @@ public class HostCapacityInventory {
     private String uuid;
     private Long totalMemory;
     private Long totalCpu;
+    private Integer cpuNum;
+    private Integer cpuSockets;
     private Long availableMemory;
     private Long availableCpu;
     private Long totalPhysicalMemory;
@@ -27,6 +29,8 @@ public class HostCapacityInventory {
         inv.setAvailableCpu(vo.getAvailableCpu());
         inv.setAvailablePhysicalMemory(vo.getAvailablePhysicalMemory());
         inv.setTotalPhysicalMemory(vo.getTotalPhysicalMemory());
+        inv.setCpuNum(vo.getCpuNum());
+        inv.setCpuSockets(vo.getCpuSockets());
         return inv;
     }
 
@@ -36,6 +40,22 @@ public class HostCapacityInventory {
             invs.add(valueOf(vo));
         }
         return invs;
+    }
+
+    public Integer getCpuSockets() {
+        return cpuSockets;
+    }
+
+    public void setCpuSockets(Integer cpuSockets) {
+        this.cpuSockets = cpuSockets;
+    }
+
+    public Integer getCpuNum() {
+        return cpuNum;
+    }
+
+    public void setCpuNum(Integer cpuNum) {
+        this.cpuNum = cpuNum;
     }
 
     public Long getTotalPhysicalMemory() {

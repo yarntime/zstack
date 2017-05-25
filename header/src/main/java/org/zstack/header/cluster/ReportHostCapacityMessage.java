@@ -1,42 +1,61 @@
 package org.zstack.header.cluster;
 
 import org.zstack.header.message.Message;
+import org.zstack.header.message.NeedReplyMessage;
 
-public class ReportHostCapacityMessage extends Message {
-	private long totalCpu;
-	private long totalMemory;
-	private long usedCpu;
-	private long usedMemory;
-	private String hostUuid;
-	
-	public long getTotalCpu() {
-    	return totalCpu;
+public class ReportHostCapacityMessage extends NeedReplyMessage {
+    private long totalMemory;
+    private long usedCpu;
+    private long usedMemory;
+    private String hostUuid;
+    private int cpuNum;
+    private int cpuSockets;
+
+    public int getCpuSockets() {
+        return cpuSockets;
     }
-	public void setTotalCpu(long totalCpu) {
-    	this.totalCpu = totalCpu;
+
+    public void setCpuSockets(int cpuSockets) {
+        this.cpuSockets = cpuSockets;
     }
-	public long getTotalMemory() {
-    	return totalMemory;
+
+    public int getCpuNum() {
+        return cpuNum;
     }
-	public void setTotalMemory(long totalMemory) {
-    	this.totalMemory = totalMemory;
+
+    public void setCpuNum(int cpuNum) {
+        this.cpuNum = cpuNum;
     }
-	public long getUsedCpu() {
-    	return usedCpu;
+
+    public long getTotalMemory() {
+        return totalMemory;
     }
-	public void setUsedCpu(long usedCpu) {
-    	this.usedCpu = usedCpu;
+
+    public void setTotalMemory(long totalMemory) {
+        this.totalMemory = totalMemory;
     }
-	public long getUsedMemory() {
-    	return usedMemory;
+
+    public long getUsedCpu() {
+        return usedCpu;
     }
-	public void setUsedMemory(long usedMemory) {
-    	this.usedMemory = usedMemory;
+
+    public void setUsedCpu(long usedCpu) {
+        this.usedCpu = usedCpu;
     }
-	public String getHostUuid() {
-    	return hostUuid;
+
+    public long getUsedMemory() {
+        return usedMemory;
     }
-	public void setHostUuid(String hostUuid) {
-    	this.hostUuid = hostUuid;
+
+    public void setUsedMemory(long usedMemory) {
+        this.usedMemory = usedMemory;
+    }
+
+    public String getHostUuid() {
+        return hostUuid;
+    }
+
+    public void setHostUuid(String hostUuid) {
+        this.hostUuid = hostUuid;
     }
 }

@@ -11,6 +11,8 @@ import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
 
+import static org.zstack.core.Platform.argerr;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -60,8 +62,7 @@ public class MonUri {
     private static final String MON_URL_FORMAT = "sshUsername:sshPassword@hostname:[sshPort]/?[monPort=]";
 
     private ErrorCode errorCode(String err) {
-        ErrorFacade errf = Platform.getComponentLoader().getComponent(ErrorFacade.class);
-        return errf.stringToInvalidArgumentError(err);
+        return argerr(err);
     }
 
     public MonUri(String url) {
@@ -93,9 +94,9 @@ public class MonUri {
             }
 
             sshPort = uri.getPort() == -1 ? sshPort : uri.getPort();
-            if (sshPort < 1 || sshPort > 65536) {
+            if (sshPort < 1 || sshPort > 65535) {
                 throw new OperationFailureException(errorCode(
-                        String.format("invalid monUrl[%s], the ssh port is greater than 65536 or lesser than 0. A valid monUrl is" +
+                        String.format("invalid monUrl[%s], the ssh port is greater than 65535 or smaller than 1. A valid monUrl is" +
                                 " in format of %s", url, MON_URL_FORMAT)
                 ));
             }

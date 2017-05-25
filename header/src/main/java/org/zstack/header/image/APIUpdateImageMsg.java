@@ -1,13 +1,23 @@
 package org.zstack.header.image;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * Created by frank on 6/14/2015.
  */
 @Action(category = ImageConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/images/{uuid}/actions",
+        method = HttpMethod.PUT,
+        responseClass = APIUpdateImageEvent.class,
+        isAction = true
+)
 public class APIUpdateImageMsg extends APIMessage implements ImageMessage {
     @APIParam(resourceType = ImageVO.class, checkAccount = true, operationTarget = true)
     private String uuid;
@@ -22,7 +32,7 @@ public class APIUpdateImageMsg extends APIMessage implements ImageMessage {
     @APIParam(maxLength = 255, validValues = {"raw", "qcow2", "iso"}, required = false)
     private String format;
     private Boolean system;
-    @APIParam(required = false, validValues = {"Linux", "Windows", "Other", "Paravirtualization"})
+    @APIParam(required = false, validValues = {"Linux", "Windows", "Other", "Paravirtualization", "WindowsVirtio"})
     private String platform;
 
     public String getPlatform() {
@@ -93,4 +103,26 @@ public class APIUpdateImageMsg extends APIMessage implements ImageMessage {
     public String getImageUuid() {
         return uuid;
     }
+ 
+    public static APIUpdateImageMsg __example__() {
+        APIUpdateImageMsg msg = new APIUpdateImageMsg();
+
+        msg.setUuid(uuid());
+        msg.setPlatform(ImagePlatform.Windows.toString());
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                ntfy("Updated").resource(uuid, ImageVO.class.getSimpleName())
+                        .messageAndEvent(that, evt).done();
+            }
+        };
+    }
+
 }

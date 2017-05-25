@@ -5,9 +5,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.springframework.transaction.annotation.Transactional;
 import org.zstack.appliancevm.ApplianceVmVO;
+import org.zstack.compute.vm.VmGlobalConfig;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.header.vm.VmInstanceDeletionPolicyManager.VmInstanceDeletionPolicy;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
@@ -23,7 +25,7 @@ import java.util.concurrent.Callable;
  * 1. create a vm with virtual router
  * 2. delete host
  * 3. set vr migration failure
- *
+ * <p>
  * confirm vr is deleted
  */
 public class TestCascadeDeletion21 {
@@ -52,7 +54,8 @@ public class TestCascadeDeletion21 {
 
     @Test
     public void test() throws ApiSenderException, InterruptedException {
-        ApplianceVmVO  vr = dbf.listAll(ApplianceVmVO.class).get(0);
+        VmGlobalConfig.VM_DELETION_POLICY.updateValue(VmInstanceDeletionPolicy.Direct.toString());
+        ApplianceVmVO vr = dbf.listAll(ApplianceVmVO.class).get(0);
         String lastHostUuid = vr.getHostUuid();
         kconfig.migrateVmSuccess = false;
         api.deleteHost(lastHostUuid);

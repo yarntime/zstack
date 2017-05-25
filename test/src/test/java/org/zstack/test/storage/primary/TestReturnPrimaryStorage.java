@@ -8,16 +8,12 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.cluster.ClusterInventory;
-import org.zstack.header.configuration.DiskOfferingInventory;
 import org.zstack.header.host.HostInventory;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.simulator.storage.primary.SimulatorPrimaryStorageDetails;
 import org.zstack.header.storage.primary.*;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
@@ -32,7 +28,7 @@ public class TestReturnPrimaryStorage {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml")
                 .addXml("PrimaryStorageManager.xml").addXml("ZoneManager.xml")
@@ -62,19 +58,19 @@ public class TestReturnPrimaryStorage {
         api.attachPrimaryStorage(cluster.getUuid(), pinv.getUuid());
 
         AllocatePrimaryStorageMsg msg = new AllocatePrimaryStorageMsg();
-        msg.setHostUuid(host.getUuid());
+        msg.setRequiredHostUuid(host.getUuid());
         msg.setSize(requiredSize);
         msg.setServiceId(bus.makeLocalServiceId(PrimaryStorageConstant.SERVICE_ID));
         MessageReply reply = bus.call(msg);
         Assert.assertEquals(AllocatePrimaryStorageReply.class, reply.getClass());
         AllocatePrimaryStorageReply ar = (AllocatePrimaryStorageReply) reply;
         Assert.assertEquals(pinv.getUuid(), ar.getPrimaryStorageInventory().getUuid());
-        
-        ReturnPrimaryStorageCapacityMsg rmsg = new ReturnPrimaryStorageCapacityMsg();
-        rmsg.setDiskSize(requiredSize);
-        rmsg.setPrimaryStorageUuid(pinv.getUuid());
-        rmsg.setServiceId(bus.makeLocalServiceId(PrimaryStorageConstant.SERVICE_ID));
-        bus.send(rmsg);
+
+        IncreasePrimaryStorageCapacityMsg imsg = new IncreasePrimaryStorageCapacityMsg();
+        imsg.setDiskSize(requiredSize);
+        imsg.setPrimaryStorageUuid(pinv.getUuid());
+        imsg.setServiceId(bus.makeLocalServiceId(PrimaryStorageConstant.SERVICE_ID));
+        bus.send(imsg);
         Thread.sleep(2000);
         PrimaryStorageVO pvo = dbf.findByUuid(pinv.getUuid(), PrimaryStorageVO.class);
         Assert.assertEquals(pvo.getCapacity().getTotalCapacity(), pvo.getCapacity().getAvailableCapacity());

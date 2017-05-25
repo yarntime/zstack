@@ -22,7 +22,7 @@ import java.sql.Timestamp;
 public class ImageCacheVolumeRefVO {
     @Id
     @Column
-    @GeneratedValue(strategy= GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private long id;
 
     @Column
@@ -42,6 +42,11 @@ public class ImageCacheVolumeRefVO {
 
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public long getId() {
         return id;

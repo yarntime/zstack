@@ -6,13 +6,13 @@ import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBusIN;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.thread.AsyncThread;
-import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.AbstractService;
 import org.zstack.header.Service;
 import org.zstack.header.core.AsyncBackup;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
+import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.Message;
 import org.zstack.header.message.MessageReply;
@@ -52,7 +52,7 @@ public class TestAsyncBackup2 {
     @Test
     public void test() throws InterruptedException {
         success = false;
-        testMethod(new Completion() {
+        testMethod(new Completion(null) {
             @Override
             public void success() {
             }
@@ -85,7 +85,7 @@ public class TestAsyncBackup2 {
     @Test
     public void test2() throws InterruptedException {
         success = false;
-        testMethod(new ReturnValueCompletion() {
+        testMethod(new ReturnValueCompletion(null) {
             @Override
             public void success(Object returnValue) {
 
@@ -113,15 +113,6 @@ public class TestAsyncBackup2 {
             @Override
             public void next() {
 
-            }
-
-            @Override
-            public void rollback() {
-
-            }
-
-            @Override
-            public void skipRestRollbacks() {
             }
 
             @Override

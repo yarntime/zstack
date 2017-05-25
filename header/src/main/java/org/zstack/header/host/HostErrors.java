@@ -12,8 +12,9 @@ public enum HostErrors {
     FAILED_TO_STOP_VM_ON_HYPERVISOR(1006),
     FAILED_TO_REBOOT_VM_ON_HYPERVISOR(1007),
     FAILED_TO_DESTROY_VM_ON_HYPERVISOR(1008),
-    FAILED_TO_MIGRATE_VM_ON_HYPERVISOR(1009);
-
+    FAILED_TO_MIGRATE_VM_ON_HYPERVISOR(1009),
+    HOST_IS_DISCONNECTED(1010),
+    OPERATION_FAILURE_GC_ELIGIBLE(1011);
     private String code;
 
     private HostErrors(int id) {
@@ -27,5 +28,9 @@ public enum HostErrors {
     @Override
     public String toString() {
         return code;
+    }
+
+    public enum Opaque {
+        NO_RECONNECT_AFTER_PING_FAILURE;
     }
 }

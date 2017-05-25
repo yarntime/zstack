@@ -12,7 +12,6 @@ import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.volume.VolumeInventory;
 import org.zstack.header.volume.VolumeVO;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
-import org.zstack.storage.primary.local.LocalStorageResourceRefVO;
 import org.zstack.storage.primary.local.LocalStorageSimulatorConfig;
 import org.zstack.storage.primary.local.LocalStorageSimulatorConfig.Capacity;
 import org.zstack.test.Api;
@@ -28,7 +27,7 @@ import org.zstack.utils.data.SizeUnit;
  * 3. stop the vm
  * 4. take snapshots from vm's root volume
  * 5. revert the volume to a previous snapshot
- *
+ * <p>
  * confirm the volume reverted successfully
  */
 public class TestLocalStorage20 {
@@ -68,9 +67,9 @@ public class TestLocalStorage20 {
         api = deployer.getApi();
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException {
+
+    @Test
+    public void test() throws ApiSenderException {
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         api.stopVmInstance(vm.getUuid());
 

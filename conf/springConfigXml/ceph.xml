@@ -5,9 +5,9 @@
     http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
     http://www.springframework.org/schema/aop
     http://www.springframework.org/schema/aop/spring-aop-3.0.xsd
-    http://www.springframework.org/schema/tx 
+    http://www.springframework.org/schema/tx
     http://www.springframework.org/schema/tx/spring-tx-3.0.xsd
-    http://zstack.org/schema/zstack 
+    http://zstack.org/schema/zstack
     http://zstack.org/schema/zstack/plugin.xsd"
     default-init-method="init" default-destroy-method="destroy">
 
@@ -18,6 +18,13 @@
             <zstack:extension interface="org.zstack.header.Component" />
         </zstack:plugin>
     </bean>
+    <bean id="CephBackupStorageMetaDataMaker" class="org.zstack.storage.ceph.backup.CephBackupStorageMetaDataMaker">
+        <zstack:plugin>
+          <zstack:extension interface="org.zstack.header.image.AddImageExtensionPoint"/>
+          <zstack:extension interface="org.zstack.header.image.ExpungeImageExtensionPoint"/>
+          <zstack:extension interface="org.zstack.header.storage.backup.AddBackupStorageExtensionPoint"/>
+        </zstack:plugin>
+    </bean>
 
     <bean id="CephPrimaryStorageFactory" class="org.zstack.storage.ceph.primary.CephPrimaryStorageFactory">
         <zstack:plugin>
@@ -26,6 +33,9 @@
             <zstack:extension interface="org.zstack.kvm.KVMStartVmExtensionPoint" />
             <zstack:extension interface="org.zstack.kvm.KVMAttachVolumeExtensionPoint" />
             <zstack:extension interface="org.zstack.kvm.KVMDetachVolumeExtensionPoint" />
+            <zstack:extension interface="org.zstack.kvm.KVMPreAttachIsoExtensionPoint" />
+            <zstack:extension interface="org.zstack.header.storage.snapshot.CreateTemplateFromVolumeSnapshotExtensionPoint" />
+            <zstack:extension interface="org.zstack.kvm.KvmSetupSelfFencerExtensionPoint" />
             <zstack:extension interface="org.zstack.header.Component" />
         </zstack:plugin>
     </bean>
@@ -36,10 +46,16 @@
         </zstack:plugin>
     </bean>
 
-    <bean id="CephKvmExternsion" class="org.zstack.storage.ceph.primary.CephKvmExternsion">
+    <bean id="CephKvmExtension" class="org.zstack.storage.ceph.primary.CephKvmExtension">
         <zstack:plugin>
             <zstack:extension interface="org.zstack.kvm.KVMHostConnectExtensionPoint" />
             <zstack:extension interface="org.zstack.header.host.HostConnectionReestablishExtensionPoint" />
+        </zstack:plugin>
+    </bean>
+
+    <bean id="CephImageCacheCleaner" class="org.zstack.storage.ceph.primary.CephImageCacheCleaner">
+        <zstack:plugin>
+            <zstack:extension interface="org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint" />
         </zstack:plugin>
     </bean>
 </beans>

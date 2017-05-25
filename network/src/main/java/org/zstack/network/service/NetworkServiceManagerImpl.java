@@ -9,7 +9,8 @@ import org.zstack.core.db.DbEntityLister;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.workflow.*;
+import org.zstack.core.notification.N;
+import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.header.AbstractService;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
@@ -19,7 +20,7 @@ import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
-import org.zstack.header.network.*;
+import org.zstack.header.network.NetworkException;
 import org.zstack.header.network.l2.L2NetworkInventory;
 import org.zstack.header.network.l2.L2NetworkVO;
 import org.zstack.header.network.l3.L3NetworkInventory;
@@ -32,6 +33,8 @@ import org.zstack.search.GetQuery;
 import org.zstack.search.SearchQuery;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -189,7 +192,7 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
 			String err = String.format("unable to detach network service provider[uuid:%s, name:%s, type:%s] to l2network[uuid:%s, name:%s, type:%s], %s",
 					vo.getUuid(), vo.getName(), vo.getType(), l2vo.getUuid(), l2vo.getName(), l2vo.getType(), e.getMessage());
 			logger.warn(err, e);
-            evt.setErrorCode(errf.instantiateErrorCode(NetworkServiceErrors.DETACH_NETWORK_SERVICE_PROVIDER_ERROR, err));
+            evt.setError(errf.instantiateErrorCode(NetworkServiceErrors.DETACH_NETWORK_SERVICE_PROVIDER_ERROR, err));
 			bus.publish(evt);
 			return;
 		}
@@ -224,7 +227,7 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
 			String err = String.format("unable to attach network service provider[uuid:%s, name:%s, type:%s] to l2network[uuid:%s, name:%s, type:%s], %s",
 					vo.getUuid(), vo.getName(), vo.getType(), l2vo.getUuid(), l2vo.getName(), l2vo.getType(), e.getMessage());
 			logger.warn(err, e);
-            evt.setErrorCode(errf.instantiateErrorCode(NetworkServiceErrors.ATTACH_NETWORK_SERVICE_PROVIDER_ERROR, err));
+            evt.setError(errf.instantiateErrorCode(NetworkServiceErrors.ATTACH_NETWORK_SERVICE_PROVIDER_ERROR, err));
 			bus.publish(evt);
 			return;
 		}
@@ -278,19 +281,34 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
             return;
         }
 
+        // we run into this situation when VM nics are all detached and the
+        // VM is being rebooted
+        if (spec.getDestNics().isEmpty()) {
+            completion.success();
+            return;
+        }
+
+        List<String> nsTypes = spec.getRequiredNetworkServiceTypes();
+
         FlowChain schain = FlowChainBuilder.newSimpleFlowChain().setName(String.format("apply-network-service-to-vm-%s", spec.getVmInventory().getUuid()));
+        schain.allowEmptyFlow();
         for (final NetworkServiceExtensionPoint ns : nsExts) {
             if (ns.getNetworkServiceExtensionPosition() != position) {
                 continue;
             }
 
+            if (!nsTypes.contains(ns.getNetworkServiceType().toString())) {
+                continue;
+            }
+
+
             Flow flow = new Flow() {
-                String __name__ = String.format(ns.getClass().getName());
+                String __name__ = String.format("apply-network-service-%s", ns.getNetworkServiceType());
 
                 @Override
                 public void run(final FlowTrigger chain, Map data) {
                     logger.debug(String.format("NetworkServiceExtensionPoint[%s] is asking back ends to apply network service[%s] if needed", ns.getClass().getName(), ns.getNetworkServiceType()));
-                    ns.applyNetworkService(spec, data, new Completion() {
+                    ns.applyNetworkService(spec, data, new Completion(chain) {
                         @Override
                         public void success() {
                             chain.next();
@@ -304,7 +322,7 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
                 }
 
                 @Override
-                public void rollback(final FlowTrigger chain, Map data) {
+                public void rollback(final FlowRollback chain, Map data) {
                     logger.debug(String.format("NetworkServiceExtensionPoint[%s] is asking back ends to release network service[%s] if needed", ns.getClass().getName(), ns.getNetworkServiceType()));
                     ns.releaseNetworkService(spec, data, new NoErrorCompletion() {
                         @Override
@@ -318,12 +336,12 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
             schain.then(flow);
         }
 
-        schain.error(new FlowErrorHandler() {
+        schain.error(new FlowErrorHandler(completion) {
             @Override
             public void handle(ErrorCode err, Map data) {
                 completion.fail(err);
             }
-        }).done(new FlowDoneHandler() {
+        }).done(new FlowDoneHandler(completion) {
             @Override
             public void handle(Map data) {
                 completion.success();
@@ -349,8 +367,8 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
         }
         
         if (targetRef == null) {
-            throw new OperationFailureException(errf.stringToOperationError(String.format("L3Network[uuid:%s] doesn't have network service[type:%s] enabled or no provider provides this network service",
-                    l3NetworkUuid, serviceType)));
+            throw new OperationFailureException(operr("L3Network[uuid:%s] doesn't have network service[type:%s] enabled or no provider provides this network service",
+                    l3NetworkUuid, serviceType));
         }
         
         SimpleQuery<NetworkServiceProviderVO> q = dbf.createQuery(NetworkServiceProviderVO.class);
@@ -390,13 +408,30 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
             return;
         }
 
+        // we run into this situation when VM nics are all detached and the
+        // VM is being rebooted
+        if (spec.getDestNics().isEmpty()) {
+            completion.done();
+            return;
+        }
+
+        List<String> nsTypes = spec.getRequiredNetworkServiceTypes();
+
         FlowChain schain = FlowChainBuilder.newSimpleFlowChain().setName(String.format("release-network-services-from-vm-%s", spec.getVmInventory().getUuid()));
+        schain.allowEmptyFlow();
+
         for (final NetworkServiceExtensionPoint ns : nsExts) {
             if (position != null && ns.getNetworkServiceExtensionPosition() != position) {
                 continue;
             }
 
+            if (!nsTypes.contains(ns.getNetworkServiceType().toString())) {
+                continue;
+            }
+
             NoRollbackFlow flow = new NoRollbackFlow() {
+                String __name__ = String.format("release-network-service-%s", ns.getNetworkServiceType());
+
                 @Override
                 public void run(final FlowTrigger chain, Map data) {
                     logger.debug(String.format("NetworkServiceExtensionPoint[%s] is asking back ends to release network service[%s] if needed", ns.getClass().getName(), ns.getNetworkServiceType()));
@@ -461,9 +496,8 @@ public class NetworkServiceManagerImpl extends AbstractService implements Networ
 
             @Override
             public void fail(ErrorCode errorCode) {
-                //TODO
-                logger.warn(String.format("failed to release a network service when rolling back attaching l3[uuid:%s] to vm[uuid:%s], %s",
-                        l3.getUuid(), spec.getVmInventory().getUuid(), errorCode));
+                N.New(VmInstanceVO.class, spec.getVmInventory().getUuid()).warn_("unable to release a network service of the VM[uuid:%s] when rolling back an attached" +
+                        " L3 network[uuid: %s], %s. You may need to reboot the VM to fix the issue", spec.getVmInventory().getUuid(), l3.getUuid(), errorCode);
                 completion.done();
             }
         });

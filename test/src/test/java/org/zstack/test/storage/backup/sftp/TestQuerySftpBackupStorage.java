@@ -1,6 +1,7 @@
 package org.zstack.test.storage.backup.sftp;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
@@ -21,6 +22,9 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
+@Ignore
+@Deprecated
+// New Groovy Case : TestQuerySftpBackupStorage.groovy
 public class TestQuerySftpBackupStorage {
     CLogger logger = Utils.getLogger(TestQuerySftpBackupStorage.class);
     Deployer deployer;
@@ -48,7 +52,7 @@ public class TestQuerySftpBackupStorage {
         gcf = loader.getComponent(GlobalConfigFacade.class);
         session = api.loginAsAdmin();
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         SftpBackupStorageInventory inv = JSONObjectUtil.rehashObject(deployer.backupStorages.get("sftp1"), SftpBackupStorageInventory.class);

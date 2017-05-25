@@ -1,12 +1,9 @@
 package org.zstack.storage.backup.sftp;
 
 import org.zstack.header.configuration.PythonClassInventory;
-import org.zstack.header.query.Unqueryable;
-import org.zstack.header.rest.APINoSee;
 import org.zstack.header.search.Inventory;
 import org.zstack.header.search.Parent;
 import org.zstack.header.storage.backup.BackupStorageInventory;
-import org.zstack.header.storage.backup.BackupStorageVO;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -17,14 +14,14 @@ import java.util.List;
 @PythonClassInventory
 public class SftpBackupStorageInventory extends BackupStorageInventory {
     public String hostname;
-    @APINoSee
-    @Unqueryable
     public String username;
+    public Integer sshPort;
 
     protected SftpBackupStorageInventory(SftpBackupStorageVO vo) {
         super(vo);
         hostname = vo.getHostname();
         username = vo.getUsername();
+        sshPort = vo.getSshPort();
     }
 
     public SftpBackupStorageInventory() {
@@ -57,6 +54,15 @@ public class SftpBackupStorageInventory extends BackupStorageInventory {
     }
 
     public void setUsername(String username) {
+
         this.username = username;
+    }
+
+    public Integer getSshPort() {
+        return sshPort;
+    }
+
+    public void setSshPort(Integer sshPort) {
+        this.sshPort = sshPort;
     }
 }

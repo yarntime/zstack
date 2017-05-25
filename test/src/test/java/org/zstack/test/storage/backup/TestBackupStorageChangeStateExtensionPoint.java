@@ -11,10 +11,7 @@ import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageState;
 import org.zstack.header.storage.backup.BackupStorageStateEvent;
 import org.zstack.header.storage.backup.BackupStorageVO;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.data.SizeUnit;
 
 public class TestBackupStorageChangeStateExtensionPoint {
@@ -26,7 +23,7 @@ public class TestBackupStorageChangeStateExtensionPoint {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml")
                 .addXml("Simulator.xml").addXml("BackupStorageManager.xml").addXml("BackupStorageChangeStateExtension.xml").addXml("AccountManager.xml").build();
@@ -35,12 +32,12 @@ public class TestBackupStorageChangeStateExtensionPoint {
         api = new Api();
         api.startServer();
     }
-    
+
     @After
     public void tearDown() throws Exception {
         api.stopServer();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         SimulatorBackupStorageDetails ss = new SimulatorBackupStorageDetails();
@@ -48,7 +45,7 @@ public class TestBackupStorageChangeStateExtensionPoint {
         ss.setUsedCapacity(0);
         ss.setUrl("nfs://simulator/backupstorage/");
         BackupStorageInventory inv = api.createSimulatorBackupStorage(1, ss).get(0);
-        
+
         ext.setPreventChange(true);
         try {
             api.changeBackupStorageState(inv.getUuid(), BackupStorageStateEvent.disable);
@@ -56,7 +53,7 @@ public class TestBackupStorageChangeStateExtensionPoint {
         }
         BackupStorageVO vo = dbf.findByUuid(inv.getUuid(), BackupStorageVO.class);
         Assert.assertEquals(BackupStorageState.Enabled, vo.getState());
-        
+
         ext.setPreventChange(false);
         ext.setExpectedBackupStorageUuid(inv.getUuid());
         ext.setExpectedCurrent(BackupStorageState.Enabled);

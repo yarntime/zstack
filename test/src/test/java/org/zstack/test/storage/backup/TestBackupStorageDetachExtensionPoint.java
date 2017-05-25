@@ -10,10 +10,7 @@ import org.zstack.header.simulator.storage.backup.SimulatorBackupStorageDetails;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageVO;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.data.SizeUnit;
 
 public class TestBackupStorageDetachExtensionPoint {
@@ -25,7 +22,7 @@ public class TestBackupStorageDetachExtensionPoint {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml")
                 .addXml("BackupStorageManager.xml").addXml("ZoneManager.xml").addXml("BackupStorageDetachExtension.xml").addXml("AccountManager.xml").build();
@@ -52,7 +49,7 @@ public class TestBackupStorageDetachExtensionPoint {
         BackupStorageVO vo = dbf.findByUuid(inv.getUuid(), BackupStorageVO.class);
         Assert.assertEquals(zone.getUuid(), vo.getAttachedZoneRefs().iterator().next().getZoneUuid());
         Assert.assertEquals(zone.getUuid(), inv.getAttachedZoneUuids().iterator().next());
-        
+
         ext.setPreventChange(true);
         try {
             api.detachBackupStorage(inv.getUuid(), zone.getUuid());
@@ -60,7 +57,7 @@ public class TestBackupStorageDetachExtensionPoint {
         }
         vo = dbf.findByUuid(inv.getUuid(), BackupStorageVO.class);
         Assert.assertEquals(1, vo.getAttachedZoneRefs().size());
-        
+
         ext.setPreventChange(false);
         ext.setExpectedBackStorageUuid(inv.getUuid());
         ext.setExpectedZoneUuid(zone.getUuid());

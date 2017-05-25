@@ -2,22 +2,19 @@ package org.zstack.network.service.vip;
 
 import org.zstack.header.network.l3.IpRangeEO;
 import org.zstack.header.network.l3.L3NetworkEO;
+import org.zstack.header.network.l3.UsedIpVO;
 import org.zstack.header.tag.AutoDeleteTag;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @Entity
 @Table
-@AutoDeleteTag
-public class VipVO {
-    @Id
-    @Column
-    private String uuid;
-
+public class VipVO extends ResourceVO {
     @Column
     @Index
     private String  name;
@@ -57,7 +54,7 @@ public class VipVO {
     private String usedIpUuid;
 
     @Column
-    @ForeignKey(parentEntityClass = L3NetworkEO.class, onDeleteAction = ReferenceOption.CASCADE)
+    @ForeignKey(parentEntityClass = L3NetworkEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String peerL3NetworkUuid;
 
     @Column
@@ -65,6 +62,11 @@ public class VipVO {
     
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public String getUsedIpUuid() {
         return usedIpUuid;
@@ -96,14 +98,6 @@ public class VipVO {
 
     public void setServiceProvider(String serviceProvider) {
         this.serviceProvider = serviceProvider;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getUseFor() {

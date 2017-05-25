@@ -1,15 +1,23 @@
 package org.zstack.header.network.l3;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APIParam;
 import org.zstack.header.message.APISyncCallMessage;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.zone.ZoneVO;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
  */
 @Action(category = L3NetworkConstant.ACTION_CATEGORY, names = {"read"})
+@RestRequest(
+        path = "/ip-capacity",
+        method = HttpMethod.GET,
+        responseClass = APIGetIpAddressCapacityReply.class
+)
 public class APIGetIpAddressCapacityMsg extends APISyncCallMessage {
     @APIParam(required = false, resourceType = ZoneVO.class)
     private List<String> zoneUuids;
@@ -50,4 +58,11 @@ public class APIGetIpAddressCapacityMsg extends APISyncCallMessage {
     public void setAll(boolean all) {
         this.all = all;
     }
+ 
+    public static APIGetIpAddressCapacityMsg __example__() {
+        APIGetIpAddressCapacityMsg msg = new APIGetIpAddressCapacityMsg();
+        msg.setIpRangeUuids(Arrays.asList(uuid()));
+        return msg;
+    }
+
 }

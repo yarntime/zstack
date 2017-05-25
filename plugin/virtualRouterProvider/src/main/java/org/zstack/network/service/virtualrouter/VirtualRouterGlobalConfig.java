@@ -20,4 +20,10 @@ public class VirtualRouterGlobalConfig {
     public static GlobalConfig PING_INTERVAL = new GlobalConfig(CATEGORY, "ping.interval");
     @GlobalConfigValidation
     public static GlobalConfig PING_PARALLELISM_DEGREE = new GlobalConfig(CATEGORY, "ping.parallelismDegree");
+    @GlobalConfigValidation
+    public static GlobalConfig SSH_USERNAME = new GlobalConfig(CATEGORY, "ssh.username");
+    @GlobalConfigValidation
+    public static GlobalConfig SSH_PORT = new GlobalConfig(CATEGORY, "ssh.port");
+    @GlobalConfigValidation
+    public static GlobalConfig VYOS_PASSWORD = new GlobalConfig(CATEGORY, "vrouter.password");
 }

@@ -1,11 +1,21 @@
 package org.zstack.header.network.l2;
 
+import org.springframework.http.HttpMethod;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * Created by frank on 6/14/2015.
  */
+@RestRequest(
+        path = "/l2-networks/{uuid}/actions",
+        method = HttpMethod.PUT,
+        responseClass = APIUpdateL2NetworkEvent.class,
+        isAction = true
+)
 public class APIUpdateL2NetworkMsg extends APIMessage implements L2NetworkMessage {
     @APIParam(resourceType = L2NetworkVO.class)
     private String uuid;
@@ -41,5 +51,27 @@ public class APIUpdateL2NetworkMsg extends APIMessage implements L2NetworkMessag
     @Override
     public String getL2NetworkUuid() {
         return uuid;
+    }
+ 
+    public static APIUpdateL2NetworkMsg __example__() {
+        APIUpdateL2NetworkMsg msg = new APIUpdateL2NetworkMsg();
+        msg.setUuid(uuid());
+        msg.setName("Test-Net");
+        msg.setDescription("Test");
+
+        return msg;
+    }
+
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                ntfy("Updated").resource(uuid, L2NetworkVO.class.getSimpleName())
+                        .messageAndEvent(that, evt).done();
+            }
+        };
     }
 }

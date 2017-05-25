@@ -1,11 +1,11 @@
 package org.zstack.header.vm;
 
-import org.zstack.header.message.Message;
+import org.zstack.header.message.NeedReplyMessage;
 
-public class ChangeVmStateMsg extends Message implements VmInstanceMessage {
+public class ChangeVmStateMsg extends NeedReplyMessage implements VmInstanceMessage {
     private String vmInstanceUuid;
     private String stateEvent;
-    
+
     @Override
     public String getVmInstanceUuid() {
         return vmInstanceUuid;

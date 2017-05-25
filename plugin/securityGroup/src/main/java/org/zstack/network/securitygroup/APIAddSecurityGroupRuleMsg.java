@@ -1,11 +1,17 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.configuration.PythonClassInventory;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 import java.util.List;
+
+import static java.util.Arrays.asList;
 
 /**
  * @api
@@ -77,6 +83,12 @@ import java.util.List;
  * see :ref:`APIAddSecurityGroupRuleEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/{securityGroupUuid}/rules",
+        method = HttpMethod.POST,
+        responseClass = APIAddSecurityGroupRuleEvent.class,
+        parameterName = "params"
+)
 public class APIAddSecurityGroupRuleMsg extends APIMessage {
     /**
      * @inventory
@@ -204,4 +216,31 @@ public class APIAddSecurityGroupRuleMsg extends APIMessage {
         this.securityGroupUuid = securityGroupUuid;
     }
     
+ 
+    public static APIAddSecurityGroupRuleMsg __example__() {
+        APIAddSecurityGroupRuleMsg msg = new APIAddSecurityGroupRuleMsg();
+        msg.setSecurityGroupUuid(uuid());
+        SecurityGroupRuleAO rule = new SecurityGroupRuleAO();
+        rule.setType("Ingress");
+        rule.setAllowedCidr("0.0.0.0/0");
+        rule.setStartPort(22);
+        rule.setEndPort(22);
+        rule.setProtocol("TCP");
+        msg.setRules(asList(rule));
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Added").resource(((APIAddSecurityGroupRuleEvent)evt).getInventory().getUuid(),SecurityGroupRuleVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
 }

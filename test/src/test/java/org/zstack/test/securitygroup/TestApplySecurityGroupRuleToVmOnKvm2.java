@@ -4,18 +4,21 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.Q;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmNicInventory;
+import org.zstack.header.vm.VmNicVO;
+import org.zstack.header.vm.VmNicVO_;
 import org.zstack.network.securitygroup.SecurityGroupInventory;
 import org.zstack.network.securitygroup.SecurityGroupRuleTO;
+import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -24,18 +27,13 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 
  * @author root
- *
- * @condition
- * 1. create two vms: vm1, vm2
+ * @condition 1. create two vms: vm1, vm2
  * 2. each vm has two nics: vm1Nic1, vm1Nic2, vm2Nic1, vm2Nic2
  * 3. create two security groups with some rules: sg1,sg2
  * 4. add vm1Nic1, vm2Nic1 to sg1
  * 5. add vm1Nic2, vm2Nic2 to sg2
- * 
- * @test
- * confirm each vm can reach each other
+ * @test confirm each vm can reach each other
  */
 public class TestApplySecurityGroupRuleToVmOnKvm2 {
     static CLogger logger = Utils.getLogger(TestApplySecurityGroupRuleToVmOnKvm2.class);
@@ -57,16 +55,13 @@ public class TestApplySecurityGroupRuleToVmOnKvm2 {
         dbf = loader.getComponent(DatabaseFacade.class);
         config = loader.getComponent(KVMSimulatorConfig.class);
     }
-    
-    private VmNicInventory getNicByL3NwUuid(List<VmNicInventory> nics, String l3NwUuid) {
-        for (VmNicInventory nic : nics) {
-            if (nic.getL3NetworkUuid().equals(l3NwUuid)) {
-                return nic;
-            }
-        }
-        throw new CloudRuntimeException(String.format("cannot find nic on l3Network[uuid:%s]", l3NwUuid));
+
+    private VmNicInventory getNicByL3NwUuid(String vmUuid, String l3NwUuid) {
+        VmNicVO nic = Q.New(VmNicVO.class).eq(VmNicVO_.vmInstanceUuid, vmUuid)
+                .eq(VmNicVO_.l3NetworkUuid, l3NwUuid).find();
+        return VmNicInventory.valueOf(nic);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         SecurityGroupInventory scinv1 = deployer.securityGroups.get("test1");
@@ -75,24 +70,24 @@ public class TestApplySecurityGroupRuleToVmOnKvm2 {
         L3NetworkInventory l3nw2 = deployer.l3Networks.get("TestL3Network2");
         VmInstanceInventory vm1 = deployer.vms.get("TestVm1");
         VmInstanceInventory vm2 = deployer.vms.get("TestVm2");
-        VmNicInventory vm1Nic1 = getNicByL3NwUuid(vm1.getVmNics(), l3nw1.getUuid());
-        VmNicInventory vm1Nic2 = getNicByL3NwUuid(vm1.getVmNics(), l3nw2.getUuid());
-        VmNicInventory vm2Nic1 = getNicByL3NwUuid(vm2.getVmNics(), l3nw1.getUuid());
-        VmNicInventory vm2Nic2 = getNicByL3NwUuid(vm2.getVmNics(), l3nw2.getUuid());
-        
+        VmNicInventory vm1Nic1 = getNicByL3NwUuid(vm1.getUuid(), l3nw1.getUuid());
+        VmNicInventory vm1Nic2 = getNicByL3NwUuid(vm1.getUuid(), l3nw2.getUuid());
+        VmNicInventory vm2Nic1 = getNicByL3NwUuid(vm2.getUuid(), l3nw1.getUuid());
+        VmNicInventory vm2Nic2 = getNicByL3NwUuid(vm2.getUuid(), l3nw2.getUuid());
+
         config.securityGroupSuccess = true;
         // add to security group 1
         List<String> nicUuids = new ArrayList<String>();
         nicUuids.add(vm1Nic1.getUuid());
         nicUuids.add(vm2Nic1.getUuid());
         api.addVmNicToSecurityGroup(scinv1.getUuid(), nicUuids);
-        
+
         // add to security group 2
         nicUuids.clear();
         nicUuids.add(vm1Nic2.getUuid());
         nicUuids.add(vm2Nic2.getUuid());
         api.addVmNicToSecurityGroup(scinv2.getUuid(), nicUuids);
-        
+
         TimeUnit.MILLISECONDS.sleep(500);
         SecurityGroupRuleTO actual11 = config.securityGroups.get(vm1Nic1.getInternalName());
         SecurityGroupRuleTO actual21 = config.securityGroups.get(vm2Nic1.getInternalName());

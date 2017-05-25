@@ -1,5 +1,6 @@
 package org.zstack.portal.apimediator;
 
+import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,6 +8,7 @@ import org.springframework.beans.factory.annotation.Configurable;
 import org.springframework.transaction.annotation.Transactional;
 import org.zstack.core.CoreGlobalProperty;
 import org.zstack.core.Platform;
+import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.db.DatabaseFacade;
@@ -15,9 +17,12 @@ import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.apimediator.GlobalApiMessageInterceptor;
 import org.zstack.header.apimediator.GlobalApiMessageInterceptor.InterceptorPosition;
+import org.zstack.header.apimediator.StopRoutingException;
 import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.*;
+import org.zstack.header.rest.RestRequest;
+import org.zstack.header.vo.EO;
 import org.zstack.portal.apimediator.schema.Service;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.FieldUtils;
@@ -27,6 +32,8 @@ import org.zstack.utils.function.FunctionNoArg;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
+import static org.zstack.core.Platform.argerr;
+
 import javax.persistence.TypedQuery;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
@@ -34,6 +41,8 @@ import javax.xml.bind.Unmarshaller;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Created with IntelliJ IDEA.
@@ -54,6 +63,8 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
     private ErrorFacade errf;
     @Autowired
     private DatabaseFacade dbf;
+    @Autowired
+    private CloudBus bus;
 
     private boolean unitTestOn;
     private List<String> configFolders;
@@ -127,12 +138,11 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
             }
         }
 
-        Set<GlobalApiMessageInterceptor> gis = null;
+        Set<GlobalApiMessageInterceptor> gis = new HashSet<GlobalApiMessageInterceptor>();
         for (Map.Entry<Class, Set<GlobalApiMessageInterceptor>> e : globalInterceptors.entrySet()) {
             Class baseMsgClz = e.getKey();
             if (baseMsgClz.isAssignableFrom(desc.getClazz())) {
-                gis = e.getValue();
-                break;
+                gis.addAll(e.getValue());
             }
         }
 
@@ -140,18 +150,17 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
         List<GlobalApiMessageInterceptor> front = new ArrayList<GlobalApiMessageInterceptor>();
         List<GlobalApiMessageInterceptor> end = new ArrayList<GlobalApiMessageInterceptor>();
 
-        if (gis != null) {
-            for (GlobalApiMessageInterceptor gi : gis) {
-                logger.debug(String.format("install GlobalApiMessageInterceptor[%s] to message[%s]", gi.getClass().getName(), desc.getClazz().getName()));
-                if (gi.getPosition() == GlobalApiMessageInterceptor.InterceptorPosition.FRONT) {
-                    front.add(gi);
-                } else if (gi.getPosition() == InterceptorPosition.END){
-                    end.add(gi);
-                } else if (gi.getPosition() == InterceptorPosition.SYSTEM) {
-                    system.add(gi);
-                }
+        for (GlobalApiMessageInterceptor gi : gis) {
+            logger.debug(String.format("install GlobalApiMessageInterceptor[%s] to message[%s]", gi.getClass().getName(), desc.getClazz().getName()));
+            if (gi.getPosition() == InterceptorPosition.FRONT) {
+                front.add(gi);
+            } else if (gi.getPosition() == InterceptorPosition.END){
+                end.add(gi);
+            } else if (gi.getPosition() == InterceptorPosition.SYSTEM) {
+                system.add(gi);
             }
         }
+
         for (GlobalApiMessageInterceptor gi : globalInterceptorsForAllMsg) {
             logger.debug(String.format("install GlobalApiMessageInterceptor[%s] to message[%s]", gi.getClass().getName(), desc.getClazz().getName()));
             if (gi.getPosition() == GlobalApiMessageInterceptor.InterceptorPosition.FRONT) {
@@ -255,39 +264,76 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
                 f.setAccessible(true);
                 Object value = f.get(msg);
 
+                if (value != null && (value instanceof String) && !at.noTrim()) {
+                    value = ((String) value).trim();
+                }
+
                 if (value != null && at.maxLength() != Integer.MIN_VALUE && (value instanceof String)) {
                     String str = (String) value;
                     if (str.length() > at.maxLength()) {
+                        throw new ApiMessageInterceptionException(argerr("field[%s] of message[%s] exceeds max length of string. expected was <= %s, actual was %s",
+                                        f.getName(), msg.getClass().getName(), at.maxLength(), str.length()));
+                    }
+                }
+
+                if (value != null && at.minLength() != 0 && (value instanceof String)) {
+                    String str = (String) value;
+                    if (str.length() < at.minLength()) {
                         throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                                String.format("field[%s] of message[%s] exceeds max length of string. expected was <= %s, actual was %s",
-                                        f.getName(), msg.getClass().getName(), at.maxLength(), str.length())
+                                String.format("field[%s] of message[%s] less than the min length of string. expected was >= %s, actual was %s",
+                                        f.getName(), msg.getClass().getName(), at.minLength(), str.length())
                         ));
                     }
                 }
 
                 if (at.required() && value == null) {
-                    throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                            String.format("field[%s] of message[%s] is mandatory, can not be null", f.getName(), msg.getClass().getName())
-                    ));
+                    throw new ApiMessageInterceptionException(argerr("field[%s] of message[%s] is mandatory, can not be null", f.getName(), msg.getClass().getName()));
                 }
 
                 if (value != null && at.validValues().length > 0) {
                     List vals = Arrays.asList(at.validValues());
 
                     if (!vals.contains(value.toString())) {
-                        throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                                String.format("valid value for field[%s] of message[%s] are %s, but actual is %s", f.getName(),
-                                        msg.getClass().getName(), vals, value)
-                        ));
+                        throw new ApiMessageInterceptionException(argerr("valid value for field[%s] of message[%s] are %s, but %s found", f.getName(),
+                                        msg.getClass().getName(), vals, value));
+                    }
+                }
+
+                if (value != null && at.validRegexValues() != null && at.validRegexValues().trim().equals("") == false) {
+                    String regex = at.validRegexValues().trim();
+                    Pattern p = Pattern.compile(regex);
+                    Matcher mt = p.matcher(value.toString());
+                    if (!mt.matches()){
+                        throw new ApiMessageInterceptionException(argerr("valid regex value for field[%s] of message[%s] are %s, but %s found", f.getName(),
+                                        msg.getClass().getName(), regex, value));
                     }
                 }
 
                 if (value !=null && at.nonempty() && value instanceof Collection) {
                     Collection col = (Collection) value;
                     if (col.isEmpty()) {
-                        throw new  ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                                String.format("field[%s] must be a nonempty list", f.getName())
-                        ));
+                        throw new  ApiMessageInterceptionException(argerr("field[%s] must be a nonempty list", f.getName()));
+                    }
+                }
+
+                if (value !=null && !at.nullElements() && value instanceof Collection) {
+                    Collection col = (Collection) value;
+                    for (Object o : col) {
+                        if (o == null) {
+                            throw new  ApiMessageInterceptionException(argerr("field[%s] cannot contain a NULL element", f.getName()));
+                        }
+                    }
+                }
+
+                if (value != null &&!at.emptyString()) {
+                    if (value instanceof String && StringUtils.isEmpty((String) value)) {
+                        throw new ApiMessageInterceptionException(argerr("field[%s] cannot be an empty string", f.getName()));
+                    } else if (value instanceof Collection) {
+                        for (Object v : (Collection)value) {
+                            if (v instanceof String && StringUtils.isEmpty((String)v)) {
+                                throw new ApiMessageInterceptionException(argerr("field[%s] cannot contain any empty string", f.getName()));
+                            }
+                        }
                     }
                 }
 
@@ -297,9 +343,7 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
                     long high = at.numberRange()[1];
                     long val = Long.valueOf(((Number) value).longValue());
                     if (val < low || val > high) {
-                        throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                                String.format("field[%s] must be in range of [%s, %s]", f.getName(), low, high)
-                        ));
+                        throw new ApiMessageInterceptionException(argerr("field[%s] must be in range of [%s, %s]", f.getName(), low, high));
                     }
                 }
 
@@ -339,15 +383,27 @@ public class ApiMessageProcessorImpl implements ApiMessageProcessor {
                         DebugUtils.Assert(String.class.isAssignableFrom(f.getType()), String.format("field[%s] of message[%s] has APIParam.resourceType specified, then the field must be uuid which is a String, but actual is %s",
                                 f.getName(), msg.getClass().getName(), f.getType()));
 
-                        if (!dbf.isExist((String) value, at.resourceType())) {
-                            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.RESOURCE_NOT_FOUND,
-                                    String.format("invalid field[%s], resource[uuid:%s, type:%s] not found", f.getName(), value, at.resourceType().getSimpleName())
-                            ));
+                        if (!dbf.isExist(value, at.resourceType())) {
+                            if (at.successIfResourceNotExisting()) {
+                                RestRequest rat = msg.getClass().getAnnotation(RestRequest.class);
+                                if (rat == null) {
+                                    throw new CloudRuntimeException(String.format("the API class[%s] does not have @RestRequest but it uses a successIfResourceNotExisting helper", msg.getClass()));
+                                }
+
+                                APIEvent evt = (APIEvent) rat.responseClass().getConstructor(String.class).newInstance(msg.getId());
+
+                                bus.publish(evt);
+                                throw new StopRoutingException();
+                            } else {
+                                throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.RESOURCE_NOT_FOUND,
+                                        String.format("invalid field[%s], resource[uuid:%s, type:%s] not found", f.getName(), value, at.resourceType().getSimpleName())
+                                ));
+                            }
                         }
                     }
                 }
             }
-        } catch (ApiMessageInterceptionException ae) {
+        } catch (ApiMessageInterceptionException | StopRoutingException ae) {
             throw ae;
         } catch (Exception e) {
             logger.warn(e.getMessage(), e);

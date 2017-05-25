@@ -8,8 +8,8 @@ import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.header.core.workflow.FlowChain;
 import org.zstack.core.workflow.FlowChainBuilder;
+import org.zstack.header.core.workflow.FlowChain;
 import org.zstack.header.core.workflow.FlowDoneHandler;
 import org.zstack.header.core.workflow.FlowErrorHandler;
 import org.zstack.header.errorcode.ErrorCode;
@@ -45,11 +45,11 @@ public class TestVmCreateOnHypervisorFlow {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
-    public void test() throws InterruptedException,ApiSenderException {
+    public void test() throws InterruptedException, ApiSenderException {
         HostInventory hinv = api.listHosts(null).get(0);
-        
+
         VmInstanceInventory vminv = new VmInstanceInventory();
         vminv.setUuid(Platform.getUuid());
         VmInstanceSpec spec = new VmInstanceSpec();
@@ -57,13 +57,13 @@ public class TestVmCreateOnHypervisorFlow {
         spec.setDestHost(hinv);
         FlowChain chain = FlowChainBuilder.newSimpleFlowChain().then(new VmCreateOnHypervisorFlow());
         chain.getData().put(VmInstanceConstant.Params.VmInstanceSpec.toString(), spec);
-        chain.done(new FlowDoneHandler() {
+        chain.done(new FlowDoneHandler(null) {
             @Override
             public void handle(Map data) {
                 isSuccess = true;
                 latch.countDown();
             }
-        }).error(new FlowErrorHandler() {
+        }).error(new FlowErrorHandler(null) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
                 isSuccess = false;

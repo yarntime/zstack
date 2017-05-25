@@ -7,6 +7,7 @@ import org.zstack.appliancevm.ApplianceVmKvmCommands.PrepareBootstrapInfoRsp;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.core.workflow.NoRollbackFlow;
 import org.zstack.header.host.HostConstant;
@@ -15,6 +16,8 @@ import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceSpec;
 import org.zstack.kvm.KVMHostAsyncHttpCallMsg;
 import org.zstack.kvm.KVMHostAsyncHttpCallReply;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.Map;
 
@@ -30,6 +33,8 @@ public class ApplianceVmKvmBootstrapFlow extends NoRollbackFlow {
     private ApplianceVmKvmBackend kvmExt;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager timeoutMgr;
 
     @Override
     public void run(final FlowTrigger chain, Map data) {
@@ -42,6 +47,7 @@ public class ApplianceVmKvmBootstrapFlow extends NoRollbackFlow {
         KVMHostAsyncHttpCallMsg msg = new KVMHostAsyncHttpCallMsg();
         msg.setPath(cmd.PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(timeoutMgr.getTimeout(cmd.getClass(), "5m"));
         msg.setHostUuid(spec.getDestHost().getUuid());
         bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, spec.getDestHost().getUuid());
         bus.send(msg, new CloudBusCallBack(chain) {
@@ -55,7 +61,7 @@ public class ApplianceVmKvmBootstrapFlow extends NoRollbackFlow {
                     if (rsp.isSuccess()) {
                         chain.next();
                     } else {
-                        chain.fail(errf.stringToOperationError(rsp.getError()));
+                        chain.fail(operr(rsp.getError()));
                     }
                 }
             }

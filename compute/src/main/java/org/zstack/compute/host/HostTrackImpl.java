@@ -32,7 +32,6 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
     private final List<String> hostUuids = Collections.synchronizedList(new ArrayList<String>());
     private Set<String> hostInTracking = Collections.synchronizedSet(new HashSet<String>());
     private Future<Void> trackerThread = null;
-    private final Map<String, HostStatusEvent> hostConnectionStateEventMap = Collections.synchronizedMap(new HashMap<String, HostStatusEvent>());
     private final List<String> inReconnectingHost = Collections.synchronizedList(new ArrayList<String>());
 
     @Autowired
@@ -52,7 +51,7 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
 
         @Override
         public long getInterval() {
-            return HostGlobalConfig.PING_HOST_INTERVAL.value(Integer.class);
+            return HostGlobalConfig.PING_HOST_INTERVAL.value(Long.class);
         }
 
         @Override
@@ -66,47 +65,48 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
                 return;
             }
 
-            final PingHostReply preply = (PingHostReply)reply;
-            HostStatusEvent cevt = preply.isConnected() ? HostStatusEvent.connected : HostStatusEvent.disconnected;
-            if (logger.isTraceEnabled()) {
-                String moreInfo = preply.isConnected() ? "all good!" : preply.getError().toString();
-                logger.trace(String.format("[Host Tracker]: ping host[uuid:%s], connection state[%s], %s", hostUuid, cevt, moreInfo));
-            }
+            final PingHostReply r = reply.castReply();
 
-            //TODO: use hostConnectionStateEventMap to implement stopping PING after failing specific times
+            if (!r.isNoReconnect()) {
+                boolean needReconnect = false;
+                if (!r.isConnected() && HostStatus.Connected.toString().equals(r.getCurrentHostStatus()) && HostGlobalConfig.AUTO_RECONNECT_ON_ERROR.value(Boolean.class)) {
+                    // cannot ping, but host is in Connected status
+                    needReconnect = true;
+                } else if (r.isConnected() && HostGlobalConfig.AUTO_RECONNECT_ON_ERROR.value(Boolean.class) && HostStatus.Disconnected.toString().equals(r.getCurrentHostStatus())) {
+                    // can ping, but host is in Disconnected status
+                    needReconnect = true;
+                } else if (!r.isConnected()) {
+                    logger.debug(String.format("[Host Tracker]: detected host[uuid:%s] connection lost, but connection.autoReconnectOnError is set to false, no reconnect will issue", hostUuid));
+                }
 
-            boolean needReconnect = cevt == HostStatusEvent.disconnected && preply.isSuccess() && HostGlobalConfig.AUTO_RECONNECT_ON_ERROR.value(Boolean.class);
-            if (needReconnect && !inReconnectingHost.contains(hostUuid)) {
-                inReconnectingHost.add(hostUuid);
-                logger.debug(String.format("[Host Tracker]: detected host[uuid:%s] connection lost, issue a reconnect because %s is set to true",
-                        hostUuid, HostGlobalConfig.AUTO_RECONNECT_ON_ERROR.getCanonicalName()));
-                ReconnectHostMsg msg = new ReconnectHostMsg();
-                msg.setHostUuid(hostUuid);
-                msg.setSkipIfHostConnected(true);
-                bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, hostUuid);
-                bus.send(msg, new CloudBusCallBack() {
-                    @Override
-                    public void run(MessageReply reply) {
-                        inReconnectingHost.remove(hostUuid);
+                //TODO: implement stopping PING after failing specific times
 
-                        if (!reply.isSuccess()) {
-                            logger.warn(String.format("host[uuid:%s] failed to reconnect, %s", hostUuid, reply.getError()));
-                            hostConnectionStateEventMap.put(hostUuid, HostStatusEvent.disconnected);
-                        } else {
-                            hostConnectionStateEventMap.put(hostUuid, HostStatusEvent.connected);
+                if (needReconnect && !inReconnectingHost.contains(hostUuid)) {
+                    inReconnectingHost.add(hostUuid);
+                    logger.debug(String.format("[Host Tracker]: detected host[uuid:%s] connection lost, issue a reconnect because %s is set to true",
+                            hostUuid, HostGlobalConfig.AUTO_RECONNECT_ON_ERROR.getCanonicalName()));
+                    ReconnectHostMsg msg = new ReconnectHostMsg();
+                    msg.setHostUuid(hostUuid);
+                    msg.setSkipIfHostConnected(true);
+                    bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, hostUuid);
+                    bus.send(msg, new CloudBusCallBack(null) {
+                        @Override
+                        public void run(MessageReply reply) {
+                            inReconnectingHost.remove(hostUuid);
+
+                            if (!reply.isSuccess()) {
+                                logger.warn(String.format("host[uuid:%s] failed to reconnect, %s", hostUuid, reply.getError()));
+                            }
                         }
-
-                    }
-                });
-            } else {
-                hostConnectionStateEventMap.put(hostUuid, cevt);
+                    });
+                }
             }
         }
 
         @Override
         public void run() {
             try {
-                List<PingHostMsg> msgs = null;
+                List<PingHostMsg> msgs;
                 synchronized (hostUuids) {
                     msgs = new ArrayList<PingHostMsg>();
                     for (String huuid : hostUuids) {
@@ -126,7 +126,8 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
                     return;
                 }
 
-                bus.send(msgs, HostGlobalConfig.HOST_TRACK_PARALLELISM_DEGREE.value(Integer.class), new CloudBusSteppingCallback() {
+                bus.send(msgs, HostGlobalConfig.HOST_TRACK_PARALLELISM_DEGREE.value(Integer.class),
+                        new CloudBusSteppingCallback(null) {
                     @Override
                     public void run(NeedReplyMessage msg, MessageReply reply) {
                         PingHostMsg pmsg = (PingHostMsg)msg;
@@ -153,7 +154,6 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
     public void untrackHost(String hostUuid) {
         synchronized (hostUuids) {
             hostUuids.remove(hostUuid);
-            hostConnectionStateEventMap.remove(hostUuid);
             logger.debug(String.format("stop tracking host[uuid:%s]", hostUuid));
         }
     }
@@ -175,7 +175,6 @@ public class HostTrackImpl implements HostTracker, ManagementNodeChangeListener,
         synchronized (hostUuids) {
             for (String huuid : huuids) {
                 hostUuids.remove(huuid);
-                hostConnectionStateEventMap.remove(huuid);
                 logger.debug(String.format("stop tracking host[uuid:%s]", huuid));
             }
         }

@@ -6,13 +6,12 @@ import org.zstack.header.allocator.*;
 import java.util.List;
 
 public abstract class AbstractHostAllocatorStrategyFactory implements HostAllocatorStrategyFactory, Component {
-    private HostAllocatorChainBuilder builder;
+    protected HostAllocatorChainBuilder builder;
     private List<String> allocatorFlowNames;
-	
-	@Override
-	public HostAllocatorStrategy getHostAllocatorStrategy() {
+
+    public HostAllocatorStrategy getHostAllocatorStrategy() {
         return builder.build();
-	}
+    }
 
     public abstract HostAllocatorStrategyType getHostAllocatorStrategyType();
 
@@ -24,13 +23,11 @@ public abstract class AbstractHostAllocatorStrategyFactory implements HostAlloca
         return allocatorFlowNames;
     }
 
-    @Override
     public boolean start() {
         builder = HostAllocatorChainBuilder.newBuilder().setFlowClassNames(allocatorFlowNames).construct();
         return true;
     }
 
-    @Override
     public boolean stop() {
         return true;
     }

@@ -8,15 +8,13 @@ import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.DbEntityLister;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.errorcode.SysErrors;
-import org.zstack.core.logging.LogFacade;
 import org.zstack.header.AbstractService;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
 import org.zstack.header.zone.*;
-import org.zstack.search.GetQuery;
 import org.zstack.search.SearchQuery;
 import org.zstack.tag.TagManager;
 import org.zstack.utils.ObjectUtils;
@@ -24,6 +22,8 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.*;
+
+import static java.util.Arrays.asList;
 
 
 public class ZoneManagerImpl extends AbstractService implements ZoneManager {
@@ -37,8 +37,6 @@ public class ZoneManagerImpl extends AbstractService implements ZoneManager {
     private PluginRegistry pluginRgty;
     @Autowired
     private DbEntityLister dl;
-    @Autowired
-    private LogFacade logf;
     @Autowired
     private ErrorFacade errf;
     @Autowired
@@ -87,10 +85,15 @@ public class ZoneManagerImpl extends AbstractService implements ZoneManager {
     }
 
     private void handle(APIGetZoneMsg msg) {
-        GetQuery query = new GetQuery();
-        String inv = query.getAsString(msg.getUuid(), ZoneInventory.class);
         APIGetZoneReply reply = new APIGetZoneReply();
-        reply.setInventory(inv);
+
+        if (msg.getUuid() != null) {
+            ZoneVO vo = dbf.findByUuid(msg.getUuid(), ZoneVO.class);
+            reply.setInventories(asList(ZoneInventory.valueOf(vo)));
+        } else {
+            reply.setInventories(ZoneInventory.valueOf(dbf.listAll(ZoneVO.class)));
+        }
+
         bus.reply(msg, reply);
     }
 
@@ -150,9 +153,6 @@ public class ZoneManagerImpl extends AbstractService implements ZoneManager {
 
         evt.setInventory(ZoneInventory.valueOf(vo));
         logger.debug("Created zone: " + vo.getName() + " uuid:" + vo.getUuid());
-        if (logf.isEnabled()) {
-            logf.info(vo.getUuid(), String.format("Create zone successfully"));
-        }
         bus.publish(evt);
     }
 

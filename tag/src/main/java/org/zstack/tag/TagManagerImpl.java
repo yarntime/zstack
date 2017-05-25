@@ -6,17 +6,15 @@ import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.MessageSafe;
 import org.zstack.core.componentloader.PluginRegistry;
-import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.HardDeleteEntityExtensionPoint;
-import org.zstack.core.db.SimpleQuery;
+import org.zstack.core.db.*;
 import org.zstack.core.db.SimpleQuery.Op;
-import org.zstack.core.db.SoftDeleteEntityExtensionPoint;
+import org.zstack.core.defer.Defer;
+import org.zstack.core.defer.Deferred;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.safeguard.Guard;
-import org.zstack.core.safeguard.SafeGuard;
 import org.zstack.header.AbstractService;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.GlobalApiMessageInterceptor;
+import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.APICreateMessage;
 import org.zstack.header.message.APIMessage;
@@ -24,10 +22,12 @@ import org.zstack.header.message.Message;
 import org.zstack.header.query.APIQueryReply;
 import org.zstack.header.tag.*;
 import org.zstack.query.QueryFacade;
-import org.zstack.tag.SystemTag.SystemTagOperation;
 import org.zstack.utils.*;
 import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.Query;
 import javax.persistence.TypedQuery;
@@ -45,23 +45,24 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     private static final CLogger logger = Utils.getLogger(TagManagerImpl.class);
 
     @Autowired
-    private DatabaseFacade dbf;
+    protected DatabaseFacade dbf;
     @Autowired
-    private CloudBus bus;
+    protected CloudBus bus;
     @Autowired
     private QueryFacade qf;
     @Autowired
-    private ErrorFacade errf;
+    protected ErrorFacade errf;
     @Autowired
     private PluginRegistry pluginRgty;
 
-    private List<SystemTag> systemTags = new ArrayList<SystemTag>();
-    private Map<String, List<SystemTag>> resourceTypeSystemTagMap = new HashMap<String, List<SystemTag>>();
-    private Map<String, Class> resourceTypeClassMap = new HashMap<String, Class>();
-    private Map<Class, Class> resourceTypeCreateMessageMap = new HashMap<Class, Class>();
-    private Map<String, List<SystemTagCreateMessageValidator>> createMessageValidators = new HashMap<String, List<SystemTagCreateMessageValidator>>();
-    private Map<String, List<SystemTagLifeCycleExtension>> lifeCycleExtensions = new HashMap<String, List<SystemTagLifeCycleExtension>>();
+    private List<SystemTag> systemTags = new ArrayList<>();
+    private Map<String, List<SystemTag>> resourceTypeSystemTagMap = new HashMap<>();
+    private Map<String, Class> resourceTypeClassMap = new HashMap<>();
+    private Map<Class, Class> resourceTypeCreateMessageMap = new HashMap<>();
+    private Map<String, List<SystemTagCreateMessageValidator>> createMessageValidators = new HashMap<>();
+    private Map<String, List<SystemTagLifeCycleExtension>> lifeCycleExtensions = new HashMap<>();
     private List<Class> autoDeleteTagClasses;
+
 
     private void initSystemTags() throws IllegalAccessException {
         List<Class> classes = BeanUtils.scanClass("org.zstack", TagDefinition.class);
@@ -79,7 +80,8 @@ public class TagManagerImpl extends AbstractService implements TagManager,
                 f.setAccessible(true);
                 SystemTag stag = (SystemTag) f.get(null);
                 if (stag == null) {
-                    throw new CloudRuntimeException(String.format("%s.%s defines a null system tag", f.getDeclaringClass(), f.getName()));
+                    throw new CloudRuntimeException(String.format("%s.%s defines a null system tag",
+                            f.getDeclaringClass(), f.getName()));
                 }
 
                 if (PatternedSystemTag.class.isAssignableFrom(f.getType())) {
@@ -88,6 +90,10 @@ public class TagManagerImpl extends AbstractService implements TagManager,
                     f.set(null, ptag);
                     systemTags.add(ptag);
                     stag = ptag;
+                } else if (EphemeralSystemTag.class.isAssignableFrom(f.getType())) {
+                    // pass
+                    // ephemeral tag is not needed to inject and validate
+                    systemTags.add(stag);
                 } else {
                     SystemTag sstag = new SystemTag(stag.getTagFormat(), stag.getResourceClass());
                     sstag.setValidators(stag.getValidators());
@@ -99,7 +105,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
                 stag.setTagMgr(this);
                 List<SystemTag> lst = resourceTypeSystemTagMap.get(stag.getResourceClass().getSimpleName());
                 if (lst == null) {
-                    lst = new ArrayList<SystemTag>();
+                    lst = new ArrayList<>();
                     resourceTypeSystemTagMap.put(stag.getResourceClass().getSimpleName(), lst);
                 }
                 lst.add(stag);
@@ -109,7 +115,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
 
     void init() {
         for (EntityType<?> entity : dbf.getEntityManager().getMetamodel().getEntities()) {
-            Class type =  entity.getJavaType();
+            Class type = entity.getJavaType();
             String name = type.getSimpleName();
             resourceTypeClassMap.put(name, type);
             logger.debug(String.format("discovered tag resource type[%s], class[%s]", name, type));
@@ -127,7 +133,8 @@ public class TagManagerImpl extends AbstractService implements TagManager,
             TagResourceType at = (TagResourceType) cmsgClz.getAnnotation(TagResourceType.class);
             Class resType = at.value();
             if (!resourceTypeClassMap.values().contains(resType)) {
-                throw new CloudRuntimeException(String.format("tag resource type[%s] defined in @TagResourceType of class[%s] is not a VO entity",
+                throw new CloudRuntimeException(String.format(
+                        "tag resource type[%s] defined in @TagResourceType of class[%s] is not a VO entity",
                         resType.getName(), cmsgClz.getName()));
             }
             resourceTypeCreateMessageMap.put(cmsgClz, resType);
@@ -148,12 +155,13 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         for (SystemTagLifeCycleExtension ext : pluginRgty.getExtensionList(SystemTagLifeCycleExtension.class)) {
             for (String resType : ext.getResourceTypeOfSystemTags()) {
                 if (!resourceTypeClassMap.containsKey(resType)) {
-                    throw new CloudRuntimeException(String.format("%s returns a unknown resource type[%s] for system tag", ext.getClass(), resType));
+                    throw new CloudRuntimeException(String.format("%s returns a unknown resource type[%s] for system tag",
+                            ext.getClass(), resType));
                 }
 
                 List<SystemTagLifeCycleExtension> lst = lifeCycleExtensions.get(resType);
                 if (lst == null) {
-                    lst = new ArrayList<SystemTagLifeCycleExtension>();
+                    lst = new ArrayList<>();
                     lifeCycleExtensions.put(resType, lst);
                 }
 
@@ -164,29 +172,27 @@ public class TagManagerImpl extends AbstractService implements TagManager,
 
     private boolean isTagExisting(String resourceUuid, String tag, TagType type, String resourceType) {
         if (type == TagType.User) {
-            SimpleQuery<UserTagVO> q = dbf.createQuery(UserTagVO.class);
-            q.add(UserTagVO_.resourceType, SimpleQuery.Op.EQ, resourceType);
-            q.add(UserTagVO_.tag, SimpleQuery.Op.EQ, tag);
-            q.add(UserTagVO_.resourceUuid, SimpleQuery.Op.EQ, resourceUuid);
-            long count = q.count();
-            return count != 0;
+            return Q.New(UserTagVO.class).eq(UserTagVO_.resourceType, resourceType)
+                    .eq(UserTagVO_.tag, tag)
+                    .eq(UserTagVO_.resourceUuid, resourceUuid)
+                    .isExists();
         } else {
-            SimpleQuery<SystemTagVO> q = dbf.createQuery(SystemTagVO.class);
-            q.add(UserTagVO_.resourceType, SimpleQuery.Op.EQ, resourceType);
-            q.add(UserTagVO_.tag, SimpleQuery.Op.EQ, tag);
-            q.add(UserTagVO_.resourceUuid, SimpleQuery.Op.EQ, resourceUuid);
-            long count = q.count();
-            return count != 0;
+            return Q.New(SystemTagVO.class).eq(SystemTagVO_.resourceType, resourceType)
+                    .eq(SystemTagVO_.tag, tag)
+                    .eq(SystemTagVO_.resourceUuid, resourceUuid)
+                    .isExists();
         }
     }
 
+    @Transactional
     private TagInventory createTag(String resourceUuid, String tag, TagType type, String resourceType) {
         if (!resourceTypeClassMap.keySet().contains(resourceType)) {
             throw new IllegalArgumentException(String.format("no resource type[%s] found for tag", resourceType));
         }
 
         if (isTagExisting(resourceUuid, tag, type, resourceType)) {
-            return null;
+            throw new OperationFailureException(operr("Duplicated Tag[tag:%s, type:%s, resourceType:%s, resourceUuid:%s]",
+                            tag, type, resourceType, resourceUuid));
         }
 
         if (type == TagType.User) {
@@ -196,7 +202,9 @@ public class TagManagerImpl extends AbstractService implements TagManager,
             vo.setUuid(Platform.getUuid());
             vo.setTag(tag);
             vo.setType(type);
-            vo = dbf.persistAndRefresh(vo);
+            dbf.getEntityManager().persist(vo);
+            dbf.getEntityManager().flush();
+            dbf.getEntityManager().refresh(vo);
             return UserTagInventory.valueOf(vo);
         } else {
             SystemTagVO vo = new SystemTagVO();
@@ -209,7 +217,9 @@ public class TagManagerImpl extends AbstractService implements TagManager,
 
             preTagCreated(SystemTagInventory.valueOf(vo));
 
-            vo = dbf.persistAndRefresh(vo);
+            dbf.getEntityManager().persist(vo);
+            dbf.getEntityManager().flush();
+            dbf.getEntityManager().refresh(vo);
 
             SystemTagInventory stag = SystemTagInventory.valueOf(vo);
             fireTagCreated(list(stag));
@@ -218,11 +228,14 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     }
 
     @Override
-    @Guard
+    @Deferred
+    @Transactional
     public SystemTagInventory createNonInherentSystemTag(String resourceUuid, String tag, String resourceType) {
         if (isTagExisting(resourceUuid, tag, TagType.System, resourceType)) {
             return null;
         }
+
+        validateSystemTag(resourceUuid, resourceType, tag);
 
         SystemTagVO vo = new SystemTagVO();
         vo.setResourceType(resourceType);
@@ -231,16 +244,17 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         vo.setInherent(false);
         vo.setTag(tag);
         vo.setType(TagType.System);
-        vo = dbf.persistAndRefresh(vo);
+
+        preTagCreated(SystemTagInventory.valueOf(vo));
+
+        dbf.getEntityManager().persist(vo);
+        dbf.getEntityManager().flush();
+        dbf.getEntityManager().refresh(vo);
+
         SystemTagInventory inv = SystemTagInventory.valueOf(vo);
 
         final SystemTagVO finalVo = vo;
-        SafeGuard.guard(new Runnable() {
-            @Override
-            public void run() {
-                dbf.remove(finalVo);
-            }
-        });
+        Defer.guard(() -> dbf.remove(finalVo));
 
         fireTagCreated(list(inv));
         return inv;
@@ -251,6 +265,8 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         if (isTagExisting(resourceUuid, tag, TagType.System, resourceType)) {
             return null;
         }
+
+        validateSystemTag(resourceUuid, resourceType, tag);
 
         SystemTagVO vo = new SystemTagVO();
         vo.setResourceType(resourceType);
@@ -285,9 +301,14 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     }
 
     @Override
+    @Transactional
     public void createTagsFromAPICreateMessage(APICreateMessage msg, String resourceUuid, String resourceType) {
         if (msg.getSystemTags() != null && !msg.getSystemTags().isEmpty()) {
             for (String sysTag : msg.getSystemTags()) {
+                if (TagConstant.isEphemeralTag(sysTag)) {
+                    continue;
+                }
+
                 createNonInherentSystemTag(resourceUuid, sysTag, resourceType);
             }
         }
@@ -300,6 +321,8 @@ public class TagManagerImpl extends AbstractService implements TagManager,
 
     @Override
     public TagInventory createSysTag(String resourceUuid, String tag, String resourceType) {
+        validateSystemTag(resourceUuid, resourceType, tag);
+
         return createTag(resourceUuid, tag, TagType.System, resourceType);
     }
 
@@ -310,6 +333,8 @@ public class TagManagerImpl extends AbstractService implements TagManager,
 
     @Override
     public TagInventory createSysTag(String resourceUuid, Enum tag, String resourceType) {
+        validateSystemTag(resourceUuid, resourceType, tag.toString());
+
         return createSysTag(resourceUuid, tag.toString(), resourceType);
     }
 
@@ -321,7 +346,11 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     @Override
     @Transactional
     public void copySystemTag(String srcResourceUuid, String srcResourceType, String dstResourceUuid, String dstResourceType) {
-        String sql = "select stag from SystemTagVO stag where stag.resourceUuid = :ruuid and stag.resourceType = :rtype and stag.inherent = :ih";
+        String sql = "select stag" +
+                " from SystemTagVO stag" +
+                " where stag.resourceUuid = :ruuid" +
+                " and stag.resourceType = :rtype" +
+                " and stag.inherent = :ih";
         TypedQuery<SystemTagVO> srcq = dbf.getEntityManager().createQuery(sql, SystemTagVO.class);
         srcq.setParameter("ruuid", srcResourceUuid);
         srcq.setParameter("rtype", srcResourceType);
@@ -337,6 +366,26 @@ public class TagManagerImpl extends AbstractService implements TagManager,
             ntag.setResourceType(dstResourceType);
             ntag.setResourceUuid(dstResourceUuid);
             dbf.getEntityManager().persist(ntag);
+        }
+    }
+
+    @Override
+    public SystemTagInventory updateSystemTag(String tagUuid, String newTag) {
+        SystemTagVO vo = dbf.findByUuid(tagUuid, SystemTagVO.class);
+        SystemTagInventory old = SystemTagInventory.valueOf(vo);
+        if (!vo.getTag().equals(newTag)) {
+            vo.setTag(newTag);
+
+            SystemTagInventory n = ObjectUtils.copy(new SystemTagInventory(), old);
+            n.setTag(newTag);
+            preTagUpdated(old, n);
+
+            vo = dbf.updateAndRefresh(vo);
+            SystemTagInventory nt = SystemTagInventory.valueOf(vo);
+            fireTagUpdated(old, nt);
+            return SystemTagInventory.valueOf(vo);
+        } else {
+            return old;
         }
     }
 
@@ -386,12 +435,13 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     }
 
     private void deleteSystemTag(String tag, String resourceUuid, String resourceType, Boolean inherit, boolean useLike) {
-        DebugUtils.Assert(tag != null || resourceUuid != null || resourceType != null, "tag, resourceUuid, resourceType cannot all be null");
+        DebugUtils.Assert(tag != null || resourceUuid != null || resourceType != null,
+                "tag, resourceUuid, resourceType cannot all be null");
         SimpleQuery<SystemTagVO> q = dbf.createQuery(SystemTagVO.class);
         if (tag != null) {
             if (useLike) {
                 q.add(SystemTagVO_.tag, Op.LIKE, tag);
-            } else{
+            } else {
                 q.add(SystemTagVO_.tag, Op.EQ, tag);
             }
         }
@@ -425,7 +475,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         deleteSystemTag(tag, resourceUuid, resourceType, inherit, true);
     }
 
-    private void fireTagDeleted(List<SystemTagInventory> tags) {
+    void fireTagDeleted(List<SystemTagInventory> tags) {
         for (SystemTagInventory tag : tags) {
             List<SystemTagLifeCycleExtension> exts = lifeCycleExtensions.get(tag.getResourceType());
             if (exts != null) {
@@ -440,7 +490,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         }
     }
 
-    private void fireTagCreated(List<SystemTagInventory> tags) {
+    void fireTagCreated(List<SystemTagInventory> tags) {
         for (SystemTagInventory tag : tags) {
             List<SystemTagLifeCycleExtension> exts = lifeCycleExtensions.get(tag.getResourceType());
             if (exts != null) {
@@ -472,7 +522,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     @MessageSafe
     public void handleMessage(Message msg) {
         if (msg instanceof APIMessage) {
-            handleApiMessage((APIMessage)msg);
+            handleApiMessage((APIMessage) msg);
         } else {
             handleLocalMessage(msg);
         }
@@ -498,26 +548,10 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         }
     }
 
-    @Guard
+    @Deferred
     private void handle(APIUpdateSystemTagMsg msg) {
         APIUpdateSystemTagEvent evt = new APIUpdateSystemTagEvent(msg.getId());
-        SystemTagVO vo = dbf.findByUuid(msg.getUuid(), SystemTagVO.class);
-        SystemTagInventory old = SystemTagInventory.valueOf(vo);
-        if (!vo.getTag().equals(msg.getTag())) {
-            vo.setTag(msg.getTag());
-
-            SystemTagInventory n = ObjectUtils.copy(new SystemTagInventory(), old);
-            n.setTag(msg.getTag());
-            preTagUpdated(old, n);
-
-            vo = dbf.updateAndRefresh(vo);
-            SystemTagInventory newTag = SystemTagInventory.valueOf(vo);
-            fireTagUpdated(old, newTag);
-            evt.setInventory(SystemTagInventory.valueOf(vo));
-        } else {
-            evt.setInventory(old);
-        }
-
+        evt.setInventory(updateSystemTag(msg.getUuid(), msg.getTag()));
         bus.publish(evt);
     }
 
@@ -573,6 +607,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         return resourceTypeClassMap.keySet();
     }
 
+
     @Override
     public void validateSystemTag(String resourceUuid, String resourceType, String tag) {
         boolean checked = false;
@@ -584,10 +619,9 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         }
 
         if (!checked) {
-            throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                    String.format("no system tag matches %s", tag)
-            ));
+            throw new ApiMessageInterceptionException(argerr("no system tag matches %s", tag));
         }
+
     }
 
     @Override
@@ -626,7 +660,7 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     }
 
     private List<String> getResourceTypes(Class entityClass) {
-        List<String> types = new ArrayList<String>();
+        List<String> types = new ArrayList<>();
         while (entityClass != Object.class) {
             types.add(entityClass.getSimpleName());
             entityClass = entityClass.getSuperclass();
@@ -637,13 +671,17 @@ public class TagManagerImpl extends AbstractService implements TagManager,
     @Transactional
     private void postDelete(Collection entityIds, Class entityClass) {
         List<String> rtypes = getResourceTypes(entityClass);
-        String sql = "delete from SystemTagVO s where s.resourceType in (:resourceTypes) and s.resourceUuid in (:resourceUuids)";
+        String sql = "delete from SystemTagVO s" +
+                " where s.resourceType in (:resourceTypes)" +
+                " and s.resourceUuid in (:resourceUuids)";
         Query q = dbf.getEntityManager().createQuery(sql);
         q.setParameter("resourceTypes", rtypes);
         q.setParameter("resourceUuids", entityIds);
         q.executeUpdate();
 
-        sql = "delete from UserTagVO s where s.resourceType in (:resourceTypes) and s.resourceUuid in (:resourceUuids)";
+        sql = "delete from UserTagVO s" +
+                " where s.resourceType in (:resourceTypes)" +
+                " and s.resourceUuid in (:resourceUuids)";
         q = dbf.getEntityManager().createQuery(sql);
         q.setParameter("resourceTypes", rtypes);
         q.setParameter("resourceUuids", entityIds);
@@ -665,11 +703,28 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         return InterceptorPosition.FRONT;
     }
 
+    private boolean isCheckSystemTags(APIMessage msg) {
+        if (msg.getSystemTags() == null) {
+            return false;
+        }
+
+        if (msg.getSystemTags().isEmpty()) {
+            return false;
+        }
+
+        for (String s : msg.getSystemTags()) {
+            if (!TagConstant.isEphemeralTag(s)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     @Override
     public APIMessage intercept(APIMessage msg) throws ApiMessageInterceptionException {
-        APICreateMessage cmsg = (APICreateMessage)msg;
-        if (cmsg.getSystemTags() != null && !cmsg.getSystemTags().isEmpty()) {
+        APICreateMessage cmsg = (APICreateMessage) msg;
+        if (isCheckSystemTags(msg)) {
             cmsg.setSystemTags(removeDuplicateFromList(cmsg.getSystemTags()));
 
             for (String tag : cmsg.getSystemTags()) {
@@ -682,16 +737,15 @@ public class TagManagerImpl extends AbstractService implements TagManager,
                 }
 
                 if (!checked) {
-                    throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                            String.format("no system tag matches %s", tag)
-                    ));
+                    throw new ApiMessageInterceptionException(argerr("no system tag matches %s", tag));
                 }
             }
 
             Class resourceType = resourceTypeCreateMessageMap.get(cmsg.getClass());
             if (resourceType == null) {
                 throw new ApiMessageInterceptionException(errf.stringToInternalError(
-                        String.format("API message[%s] doesn't define resource type by @TagResourceType", cmsg.getClass().getName())
+                        String.format("API message[%s] doesn't define resource type by @TagResourceType",
+                                cmsg.getClass().getName())
                 ));
             }
 
@@ -706,55 +760,83 @@ public class TagManagerImpl extends AbstractService implements TagManager,
         return msg;
     }
 
+    private boolean isTagMatch(SystemTagInventory t, SystemTag s) {
+        return s.isMatch(t.getTag());
+    }
+
     @Override
     public List<String> getResourceTypeOfSystemTags() {
-        List<String> lst = new ArrayList<String>();
+        List<String> lst = new ArrayList<>();
         lst.addAll(resourceTypeClassMap.keySet());
         return lst;
     }
 
-    private void preTagCreated(SystemTagInventory tag) {
+    void preTagCreated(SystemTagInventory tag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(tag.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callCreatedJudger(tag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(tag, stag)) {
+                    stag.callCreatedJudger(tag);
+                }
+            }
         }
     }
 
     @Override
     public void tagCreated(SystemTagInventory tag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(tag.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callTagCreatedListener(tag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(tag, stag)) {
+                    stag.callTagCreatedListener(tag);
+                }
+            }
         }
     }
 
-    private void preTagDeleted(SystemTagInventory tag) {
+    void preTagDeleted(SystemTagInventory tag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(tag.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callDeletedJudger(tag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(tag, stag)) {
+                    stag.callDeletedJudger(tag);
+                }
+            }
         }
     }
 
     @Override
     public void tagDeleted(SystemTagInventory tag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(tag.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callTagDeletedListener(tag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(tag, stag)) {
+                    stag.callTagDeletedListener(tag);
+                }
+            }
         }
     }
 
     private void preTagUpdated(SystemTagInventory old, SystemTagInventory newTag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(old.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callUpdatedJudger(old, newTag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(old, stag) && isTagMatch(newTag, stag)) {
+                    stag.callUpdatedJudger(old, newTag);
+                }
+            }
         }
     }
 
     @Override
     public void tagUpdated(SystemTagInventory old, SystemTagInventory newTag) {
         List<SystemTag> tags = resourceTypeSystemTagMap.get(old.getResourceType());
-        for (SystemTag stag : tags) {
-            stag.callTagUpdatedListener(old, newTag);
+        if (tags != null) {
+            for (SystemTag stag : tags) {
+                if (isTagMatch(old, stag) && isTagMatch(newTag, stag)) {
+                    stag.callTagUpdatedListener(old, newTag);
+                }
+            }
         }
     }
 

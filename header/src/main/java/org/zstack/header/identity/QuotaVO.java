@@ -1,5 +1,8 @@
 package org.zstack.header.identity;
 
+import org.zstack.header.vo.ResourceVO;
+import org.zstack.header.vo.ResourceVO_;
+
 import javax.persistence.*;
 import java.sql.Timestamp;
 
@@ -8,12 +11,7 @@ import java.sql.Timestamp;
  */
 @Entity
 @Table
-public class QuotaVO {
-    @Id
-    @Column
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
-    private Long id;
-
+public class QuotaVO extends ResourceVO {
     @Column
     private String name;
 
@@ -32,12 +30,9 @@ public class QuotaVO {
     @Column
     private Timestamp createDate;
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
     }
 
     public String getName() {

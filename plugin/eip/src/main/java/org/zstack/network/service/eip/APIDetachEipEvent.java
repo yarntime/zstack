@@ -1,6 +1,7 @@
 package org.zstack.network.service.eip;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
 
 /**
  *@apiResult
@@ -25,6 +26,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse(allTo = "inventory")
 public class APIDetachEipEvent extends APIEvent {
     /**
      * @desc see :ref:`EipInventory`
@@ -46,4 +48,17 @@ public class APIDetachEipEvent extends APIEvent {
     public APIDetachEipEvent() {
         super(null);
     }
+ 
+    public static APIDetachEipEvent __example__() {
+        APIDetachEipEvent event = new APIDetachEipEvent();
+
+        EipInventory eip = new EipInventory();
+        eip.setVipUuid(uuid());
+        eip.setVmNicUuid(uuid());
+        eip.setName("Test-EIP");
+
+        event.setInventory(eip);
+        return event;
+    }
+
 }

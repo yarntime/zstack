@@ -1,5 +1,6 @@
 package org.zstack.identity;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
@@ -8,8 +9,13 @@ import org.zstack.core.Platform;
 import org.zstack.core.cascade.CascadeConstant;
 import org.zstack.core.cascade.CascadeFacade;
 import org.zstack.core.cloudbus.CloudBus;
+import org.zstack.core.cloudbus.EventFacade;
 import org.zstack.core.cloudbus.MessageSafe;
+import org.zstack.core.componentloader.PluginRegistry;
+import org.zstack.core.db.*;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.Q;
+import org.zstack.core.db.SQLBatch;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
@@ -20,10 +26,20 @@ import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.identity.*;
+import org.zstack.header.identity.IdentityCanonicalEvents.AccountDeletedData;
+import org.zstack.header.identity.IdentityCanonicalEvents.UserDeletedData;
 import org.zstack.header.message.APIDeleteMessage.DeletionMode;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
+import org.zstack.utils.CollectionUtils;
+import org.zstack.utils.DebugUtils;
+import org.zstack.utils.ExceptionDSL;
+import org.zstack.utils.Utils;
+import org.zstack.utils.function.ForEachFunction;
 import org.zstack.utils.gson.JSONObjectUtil;
+import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.argerr;
 
 import javax.persistence.Query;
 import javax.persistence.Tuple;
@@ -36,6 +52,8 @@ import static org.zstack.utils.CollectionDSL.list;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class AccountBase extends AbstractAccount {
+    private static final CLogger logger = Utils.getLogger(AccountBase.class);
+
     @Autowired
     private CloudBus bus;
     @Autowired
@@ -46,6 +64,10 @@ public class AccountBase extends AbstractAccount {
     private AccountManager acntMgr;
     @Autowired
     private CascadeFacade casf;
+    @Autowired
+    private PluginRegistry pluginRgty;
+    @Autowired
+    private EventFacade evtf;
 
     private AccountVO vo;
 
@@ -65,7 +87,15 @@ public class AccountBase extends AbstractAccount {
 
     private void handle(APIUpdateAccountMsg msg) {
         AccountVO account = dbf.findByUuid(msg.getUuid(), AccountVO.class);
-        account.setPassword(msg.getPassword());
+        if (msg.getName() != null) {
+            account.setName(msg.getName());
+        }
+        if (msg.getDescription() != null) {
+            account.setDescription(msg.getDescription());
+        }
+        if (msg.getPassword() != null) {
+            account.setPassword(msg.getPassword());
+        }
         account = dbf.updateAndRefresh(account);
 
         APIUpdateAccountEvent evt = new APIUpdateAccountEvent(msg.getId());
@@ -160,13 +190,18 @@ public class AccountBase extends AbstractAccount {
                     public void handle(Map data) {
                         dbf.remove(vo);
                         bus.publish(evt);
+
+                        AccountDeletedData evtData = new AccountDeletedData();
+                        evtData.setAccountUuid(vo.getUuid());
+                        evtData.setInventory(AccountInventory.valueOf(vo));
+                        evtf.fire(IdentityCanonicalEvents.ACCOUNT_DELETED_PATH, evtData);
                     }
                 });
 
                 error(new FlowErrorHandler(msg) {
                     @Override
                     public void handle(ErrorCode errCode, Map data) {
-                        evt.setErrorCode(errCode);
+                        evt.setError(errCode);
                         bus.publish(evt);
                     }
                 });
@@ -217,11 +252,11 @@ public class AccountBase extends AbstractAccount {
         } else if (msg instanceof APICreatePolicyMsg) {
             handle((APICreatePolicyMsg) msg);
         } else if (msg instanceof APIAttachPolicyToUserMsg) {
-            handle((APIAttachPolicyToUserMsg)msg);
+            handle((APIAttachPolicyToUserMsg) msg);
         } else if (msg instanceof APICreateUserGroupMsg) {
-            handle((APICreateUserGroupMsg)msg);
+            handle((APICreateUserGroupMsg) msg);
         } else if (msg instanceof APIAttachPolicyToUserGroupMsg) {
-            handle((APIAttachPolicyToUserGroupMsg)msg);
+            handle((APIAttachPolicyToUserGroupMsg) msg);
         } else if (msg instanceof APIAddUserToGroupMsg) {
             handle((APIAddUserToGroupMsg) msg);
         } else if (msg instanceof APIDeleteUserGroupMsg) {
@@ -246,9 +281,117 @@ public class AccountBase extends AbstractAccount {
             handle((APIUpdateQuotaMsg) msg);
         } else if (msg instanceof APIDeleteAccountMsg) {
             handle((APIDeleteAccountMsg) msg);
+        } else if (msg instanceof APIGetAccountQuotaUsageMsg) {
+            handle((APIGetAccountQuotaUsageMsg) msg);
+        } else if (msg instanceof APIAttachPoliciesToUserMsg) {
+            handle((APIAttachPoliciesToUserMsg) msg);
+        } else if (msg instanceof APIDetachPoliciesFromUserMsg) {
+            handle((APIDetachPoliciesFromUserMsg) msg);
+        } else if (msg instanceof APIUpdateUserGroupMsg) {
+            handle((APIUpdateUserGroupMsg) msg);
         } else {
             bus.dealWithUnknownMessage(msg);
         }
+    }
+
+    private void handle(APIUpdateUserGroupMsg msg) {
+        UserGroupVO group = dbf.findByUuid(msg.getUuid(), UserGroupVO.class);
+
+        if (!AccountConstant.INITIAL_SYSTEM_ADMIN_UUID.equals(msg.getAccountUuid()) &&
+                !group.getAccountUuid().equals(msg.getAccountUuid())) {
+            throw new OperationFailureException(argerr("the user group[uuid:%s] does not belong to the account[uuid:%s]", group.getUuid(), msg.getAccountUuid()));
+        }
+
+        boolean update = false;
+        if (msg.getName() != null) {
+            group.setName(msg.getName());
+            update = true;
+        }
+        if (msg.getDescription() != null) {
+            group.setDescription(msg.getDescription());
+            update = true;
+        }
+
+        if (update) {
+            group = dbf.updateAndRefresh(group);
+        }
+
+        APIUpdateUserGroupEvent evt = new APIUpdateUserGroupEvent(msg.getId());
+        evt.setInventory(UserGroupInventory.valueOf(group));
+        bus.publish(evt);
+    }
+
+    @Transactional
+    private void handle(APIDetachPoliciesFromUserMsg msg) {
+        String sql = "delete from UserPolicyRefVO ref where ref.policyUuid in (:puuids) and ref.userUuid = :userUuid";
+        Query q = dbf.getEntityManager().createQuery(sql);
+        q.setParameter("puuids", msg.getPolicyUuids());
+        q.setParameter("userUuid", msg.getUserUuid());
+        q.executeUpdate();
+
+        APIDetachPoliciesFromUserEvent evt = new APIDetachPoliciesFromUserEvent(msg.getId());
+        bus.publish(evt);
+    }
+
+    @Transactional
+    private void handle(APIAttachPoliciesToUserMsg msg) {
+        for (String puuid : msg.getPolicyUuids()) {
+            try {
+                UserPolicyRefVO refVO = new UserPolicyRefVO();
+                refVO.setUserUuid(msg.getUserUuid());
+                refVO.setPolicyUuid(puuid);
+                dbf.getEntityManager().persist(refVO);
+                dbf.getEntityManager().flush();
+            } catch (Throwable t) {
+                if (!ExceptionDSL.isCausedBy(t, ConstraintViolationException.class)) {
+                    throw t;
+                }
+
+                // the policy is already attached
+            }
+        }
+
+        APIAttachPoliciesToUserEvent evt = new APIAttachPoliciesToUserEvent(msg.getId());
+        bus.publish(evt);
+    }
+
+    private void handle(APIGetAccountQuotaUsageMsg msg) {
+        APIGetAccountQuotaUsageReply reply = new APIGetAccountQuotaUsageReply();
+
+        List<Quota> quotas = acntMgr.getQuotas();
+        List<Quota.QuotaUsage> usages = new ArrayList<Quota.QuotaUsage>();
+
+        for (Quota q : quotas) {
+            List<Quota.QuotaUsage> us = q.getOperator().getQuotaUsageByAccount(msg.getAccountUuid());
+            DebugUtils.Assert(us != null, String.format("%s returns null quotas", q.getOperator().getClass()));
+            usages.addAll(us);
+        }
+
+        Map<String, Quota.QuotaUsage> umap = new HashMap<String, Quota.QuotaUsage>();
+        for (Quota.QuotaUsage usage : usages) {
+            umap.put(usage.getName(), usage);
+        }
+
+        SimpleQuery<QuotaVO> q = dbf.createQuery(QuotaVO.class);
+        q.add(QuotaVO_.identityUuid, Op.EQ, msg.getAccountUuid());
+        q.add(QuotaVO_.identityType, Op.EQ, AccountVO.class.getSimpleName());
+        q.add(QuotaVO_.name, Op.IN, umap.keySet());
+        List<QuotaVO> vos = q.list();
+        Map<String, QuotaVO> vmap = new HashMap<String, QuotaVO>();
+        for (QuotaVO vo : vos) {
+            vmap.put(vo.getName(), vo);
+        }
+
+        for (Map.Entry<String, Quota.QuotaUsage> e : umap.entrySet()) {
+            Quota.QuotaUsage u = e.getValue();
+            QuotaVO vo = vmap.get(u.getName());
+            u.setTotal(vo == null ? 0 : vo.getValue());
+        }
+
+        List<Quota.QuotaUsage> ret = new ArrayList<Quota.QuotaUsage>();
+        ret.addAll(umap.values());
+        reply.setUsages(ret);
+        bus.reply(msg, reply);
     }
 
     private void handle(APIUpdateQuotaMsg msg) {
@@ -258,9 +401,7 @@ public class AccountBase extends AbstractAccount {
         QuotaVO quota = q.find();
 
         if (quota == null) {
-            throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                    String.format("cannot find Quota[name: %s] for the account[uuid: %s]", msg.getName(), msg.getIdentityUuid())
-            ));
+            throw new OperationFailureException(argerr("cannot find Quota[name: %s] for the account[uuid: %s]", msg.getName(), msg.getIdentityUuid()));
         }
 
         quota.setValue(msg.getValue());
@@ -319,36 +460,43 @@ public class AccountBase extends AbstractAccount {
 
         for (String ruuid : msg.getResourceUuids()) {
             if (!uuidType.containsKey(ruuid)) {
-                throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                        String.format("the account[uuid: %s] doesn't have a resource[uuid: %s]", vo.getUuid(), ruuid)
-                ));
+                throw new OperationFailureException(argerr("the account[uuid: %s] doesn't have a resource[uuid: %s]", vo.getUuid(), ruuid));
             }
         }
 
-        List<SharedResourceVO> vos = new ArrayList<SharedResourceVO>();
-        if (msg.isToPublic()) {
-            for (String ruuid : msg.getResourceUuids()) {
-                SharedResourceVO svo = new SharedResourceVO();
-                svo.setOwnerAccountUuid(msg.getAccountUuid());
-                svo.setResourceType(uuidType.get(ruuid));
-                svo.setResourceUuid(ruuid);
-                svo.setToPublic(true);
-                vos.add(svo);
-            }
-        } else {
-            for (String ruuid : msg.getResourceUuids()) {
-                for (String auuid : msg.getAccountUuids()) {
-                    SharedResourceVO svo = new SharedResourceVO();
-                    svo.setOwnerAccountUuid(msg.getAccountUuid());
-                    svo.setResourceType(uuidType.get(ruuid));
-                    svo.setResourceUuid(ruuid);
-                    svo.setReceiverAccountUuid(auuid);
-                    vos.add(svo);
+        new SQLBatch(){
+            @Override
+            protected void scripts() {
+                if (msg.isToPublic()) {
+                    for (String ruuid : msg.getResourceUuids()) {
+                        if(Q.New(SharedResourceVO.class)
+                                .eq(SharedResourceVO_.ownerAccountUuid, msg.getAccountUuid())
+                                .eq(SharedResourceVO_.resourceUuid, ruuid)
+                                .eq(SharedResourceVO_.toPublic, msg.isToPublic())
+                                .isExists()){
+                            continue;
+                        }
+                        SharedResourceVO svo = new SharedResourceVO();
+                        svo.setOwnerAccountUuid(msg.getAccountUuid());
+                        svo.setResourceType(uuidType.get(ruuid));
+                        svo.setResourceUuid(ruuid);
+                        svo.setToPublic(true);
+                        dbf.getEntityManager().persist(svo);
+                    }
+                } else {
+                    for (String ruuid : msg.getResourceUuids()) {
+                        for (String auuid : msg.getAccountUuids()) {
+                            SharedResourceVO svo = new SharedResourceVO();
+                            svo.setOwnerAccountUuid(msg.getAccountUuid());
+                            svo.setResourceType(uuidType.get(ruuid));
+                            svo.setResourceUuid(ruuid);
+                            svo.setReceiverAccountUuid(auuid);
+                            dbf.getEntityManager().persist(svo);
+                        }
+                    }
                 }
             }
-        }
-
-        dbf.persistCollection(vos);
+        }.execute();
 
         APIShareResourceEvent evt = new APIShareResourceEvent(msg.getId());
         bus.publish(evt);
@@ -356,10 +504,31 @@ public class AccountBase extends AbstractAccount {
 
     private void handle(APIUpdateUserMsg msg) {
         UserVO user = dbf.findByUuid(msg.getUuid(), UserVO.class);
-        user.setPassword(msg.getPassword());
-        dbf.update(user);
+
+        if (!AccountConstant.INITIAL_SYSTEM_ADMIN_UUID.equals(msg.getAccountUuid()) && !user.getAccountUuid().equals(msg.getAccountUuid())) {
+            throw new OperationFailureException(argerr("the user[uuid:%s] does not belong to the" +
+                    " account[uuid:%s]", user.getUuid(), msg.getAccountUuid()));
+        }
+
+        boolean update = false;
+        if (msg.getName() != null) {
+            user.setName(msg.getName());
+            update = true;
+        }
+        if (msg.getDescription() != null) {
+            user.setDescription(msg.getDescription());
+            update = true;
+        }
+        if (msg.getPassword() != null) {
+            user.setPassword(msg.getPassword());
+            update = true;
+        }
+        if (update) {
+            user = dbf.updateAndRefresh(user);
+        }
 
         APIUpdateUserEvent evt = new APIUpdateUserEvent(msg.getId());
+        evt.setInventory(UserInventory.valueOf(user));
         bus.publish(evt);
     }
 
@@ -406,7 +575,17 @@ public class AccountBase extends AbstractAccount {
     }
 
     private void handle(APIDeleteUserMsg msg) {
-        dbf.removeByPrimaryKey(msg.getUuid(), UserVO.class);
+        UserVO user = dbf.findByUuid(msg.getUuid(), UserVO.class);
+        if (user != null) {
+            UserInventory inv = UserInventory.valueOf(user);
+            UserDeletedData d = new UserDeletedData();
+            d.setInventory(inv);
+            d.setUserUuid(inv.getUuid());
+            evtf.fire(IdentityCanonicalEvents.USER_DELETED_PATH, d);
+
+            dbf.remove(user);
+        }
+
         APIDeleteUserEvent evt = new APIDeleteUserEvent(msg.getId());
         bus.publish(evt);
     }
@@ -430,7 +609,17 @@ public class AccountBase extends AbstractAccount {
         UserGroupPolicyRefVO grvo = new UserGroupPolicyRefVO();
         grvo.setGroupUuid(msg.getGroupUuid());
         grvo.setPolicyUuid(msg.getPolicyUuid());
-        dbf.persist(grvo);
+
+        try {
+            dbf.persist(grvo);
+        } catch (Throwable t) {
+            if (!ExceptionDSL.isCausedBy(t, ConstraintViolationException.class)) {
+                throw t;
+            }
+
+            // the policy is already attached
+        }
+
         APIAttachPolicyToUserGroupEvent evt = new APIAttachPolicyToUserGroupEvent(msg.getId());
         bus.publish(evt);
     }
@@ -445,9 +634,17 @@ public class AccountBase extends AbstractAccount {
         gvo.setAccountUuid(vo.getUuid());
         gvo.setDescription(msg.getDescription());
         gvo.setName(msg.getName());
-        dbf.persistAndRefresh(gvo);
 
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), gvo.getUuid(), UserGroupVO.class);
+        UserGroupVO finalGvo = gvo;
+        gvo = new SQLBatchWithReturn<UserGroupVO>() {
+            @Override
+            protected UserGroupVO scripts() {
+                persist(finalGvo);
+                reload(finalGvo);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), finalGvo.getUuid(), UserGroupVO.class);
+                return finalGvo;
+            }
+        }.execute();
 
         UserGroupInventory inv = UserGroupInventory.valueOf(gvo);
         APICreateUserGroupEvent evt = new APICreateUserGroupEvent(msg.getId());
@@ -459,8 +656,16 @@ public class AccountBase extends AbstractAccount {
         UserPolicyRefVO upvo = new UserPolicyRefVO();
         upvo.setPolicyUuid(msg.getPolicyUuid());
         upvo.setUserUuid(msg.getUserUuid());
-        dbf.persist(upvo);
-        
+        try {
+            dbf.persist(upvo);
+        } catch (Throwable t) {
+            if (!ExceptionDSL.isCausedBy(t, ConstraintViolationException.class)) {
+                throw t;
+            }
+
+            // the policy is already attached
+        }
+
         APIAttachPolicyToUserEvent evt = new APIAttachPolicyToUserEvent(msg.getId());
         bus.publish(evt);
     }
@@ -475,9 +680,17 @@ public class AccountBase extends AbstractAccount {
         pvo.setAccountUuid(vo.getUuid());
         pvo.setName(msg.getName());
         pvo.setData(JSONObjectUtil.toJsonString(msg.getStatements()));
-        pvo = dbf.persistAndRefresh(pvo);
 
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), pvo.getUuid(), PolicyVO.class);
+        PolicyVO finalPvo = pvo;
+        pvo = new SQLBatchWithReturn<PolicyVO>() {
+            @Override
+            protected PolicyVO scripts() {
+                persist(finalPvo);
+                reload(finalPvo);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), finalPvo.getUuid(), PolicyVO.class);
+                return finalPvo;
+            }
+        }.execute();
 
         PolicyInventory pinv = PolicyInventory.valueOf(pvo);
         APICreatePolicyEvent evt = new APICreatePolicyEvent(msg.getId());
@@ -485,45 +698,57 @@ public class AccountBase extends AbstractAccount {
         bus.publish(evt);
     }
 
-
-
     private void handle(APICreateUserMsg msg) {
         APICreateUserEvent evt = new APICreateUserEvent(msg.getId());
-        UserVO uvo = new UserVO();
-        if (msg.getResourceUuid() != null) {
-            uvo.setUuid(msg.getResourceUuid());
-        } else {
-            uvo.setUuid(Platform.getUuid());
-        }
-        uvo.setAccountUuid(vo.getUuid());
-        uvo.setName(msg.getName());
-        uvo.setPassword(msg.getPassword());
-        uvo.setDescription(msg.getDescription());
-        uvo = dbf.persistAndRefresh(uvo);
 
-        SimpleQuery<PolicyVO> q = dbf.createQuery(PolicyVO.class);
-        q.add(PolicyVO_.name, Op.EQ, String.format("DEFAULT-READ-%s", vo.getUuid()));
-        PolicyVO p = q.find();
-        if (p != null) {
-            UserPolicyRefVO uref = new UserPolicyRefVO();
-            uref.setPolicyUuid(p.getUuid());
-            uref.setUserUuid(uvo.getUuid());
-            dbf.persist(uref);
-        }
+        UserVO uvo = new SQLBatchWithReturn<UserVO>() {
+            @Override
+            protected UserVO scripts() {
+                UserVO uvo = new UserVO();
+                if (msg.getResourceUuid() != null) {
+                    uvo.setUuid(msg.getResourceUuid());
+                } else {
+                    uvo.setUuid(Platform.getUuid());
+                }
+                uvo.setAccountUuid(vo.getUuid());
+                uvo.setName(msg.getName());
+                uvo.setPassword(msg.getPassword());
+                uvo.setDescription(msg.getDescription());
+                persist(uvo);
+                reload(uvo);
 
-        q = dbf.createQuery(PolicyVO.class);
-        q.add(PolicyVO_.name, Op.EQ, String.format("USER-RESET-PASSWORD-%s", vo.getUuid()));
-        p = q.find();
-        if (p != null) {
-            UserPolicyRefVO uref = new UserPolicyRefVO();
-            uref.setPolicyUuid(p.getUuid());
-            uref.setUserUuid(uvo.getUuid());
-            dbf.persist(uref);
-        }
+                PolicyVO p = Q.New(PolicyVO.class).eq(PolicyVO_.name, "DEFAULT-READ")
+                        .eq(PolicyVO_.accountUuid, vo.getUuid()).find();
+                if (p != null) {
+                    UserPolicyRefVO uref = new UserPolicyRefVO();
+                    uref.setPolicyUuid(p.getUuid());
+                    uref.setUserUuid(uvo.getUuid());
+                    persist(uref);
+                }
 
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), uvo.getUuid(), UserVO.class);
+                p = Q.New(PolicyVO.class).eq(PolicyVO_.name, "USER-RESET-PASSWORD")
+                        .eq(PolicyVO_.accountUuid, vo.getUuid()).find();
+                if (p != null) {
+                    UserPolicyRefVO uref = new UserPolicyRefVO();
+                    uref.setPolicyUuid(p.getUuid());
+                    uref.setUserUuid(uvo.getUuid());
+                    persist(uref);
+                }
 
-        UserInventory inv = UserInventory.valueOf(uvo);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), uvo.getUuid(), UserVO.class);
+                return uvo;
+            }
+        }.execute();
+
+        final UserInventory inv = UserInventory.valueOf(uvo);
+
+        CollectionUtils.safeForEach(pluginRgty.getExtensionList(AfterCreateUserExtensionPoint.class), new ForEachFunction<AfterCreateUserExtensionPoint>() {
+            @Override
+            public void run(AfterCreateUserExtensionPoint arg) {
+                arg.afterCreateUser(inv);
+            }
+        });
+
         evt.setInventory(inv);
         bus.publish(evt);
     }

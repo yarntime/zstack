@@ -7,32 +7,32 @@ import org.zstack.header.image.ImageEO;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
+import org.zstack.header.volume.Volume;
+import org.zstack.header.volume.VolumeEO;
+import org.zstack.header.volume.VolumeVO;
 import org.zstack.header.zone.ZoneEO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @MappedSuperclass
-public class VmInstanceAO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class VmInstanceAO extends ResourceVO {
     @Column
     @Index(length = 128)
     private String name;
-    
+
     @Column
     private String description;
-    
+
     @Column
     @ForeignKey(parentEntityClass = ZoneEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String zoneUuid;
-    
+
     @Column
     @ForeignKey(parentEntityClass = ClusterEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String clusterUuid;
-    
+
     @Column
     @ForeignKey(parentEntityClass = ImageEO.class, onDeleteAction = ReferenceOption.RESTRICT)
     private String imageUuid;
@@ -40,19 +40,20 @@ public class VmInstanceAO {
     @Column
     @ForeignKey(parentEntityClass = HostEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String hostUuid;
-    
+
     @Column
     private Long internalId;
-    
+
     @Column
     @ForeignKey(parentEntityClass = HostEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String lastHostUuid;
-    
+
     @Column
     @ForeignKey(parentEntityClass = InstanceOfferingEO.class, onDeleteAction = ReferenceOption.RESTRICT)
     private String instanceOfferingUuid;
-    
+
     @Column
+    @ForeignKey(parentEntityClass = VolumeEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String rootVolumeUuid;
 
     @Column
@@ -60,7 +61,7 @@ public class VmInstanceAO {
 
     @Column
     private String type;
-    
+
     @Column
     private String hypervisorType;
 
@@ -81,10 +82,10 @@ public class VmInstanceAO {
 
     @Column
     private Timestamp createDate;
-    
+
     @Column
     private Timestamp lastOpDate;
-    
+
     @Column
     @Enumerated(EnumType.STRING)
     private VmInstanceState state;
@@ -115,6 +116,11 @@ public class VmInstanceAO {
         this.lastOpDate = other.lastOpDate;
         this.state = other.state;
         this.platform = other.platform;
+    }
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
     }
 
     public String getPlatform() {
@@ -163,14 +169,6 @@ public class VmInstanceAO {
 
     public void setDefaultL3NetworkUuid(String defaultL3NetworkUuid) {
         this.defaultL3NetworkUuid = defaultL3NetworkUuid;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getName() {

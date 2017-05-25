@@ -3,7 +3,6 @@ package org.zstack.core.ansible;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.DirectoryWalker;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang.StringUtils;
 import org.ini4j.Wini;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.zstack.core.CoreGlobalProperty;
@@ -19,18 +18,23 @@ import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.Message;
-import org.zstack.utils.*;
+import org.zstack.utils.DebugUtils;
+import org.zstack.utils.ShellUtils;
 import org.zstack.utils.ShellUtils.ShellException;
+import org.zstack.utils.StringDSL;
+import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
-import java.io.*;
+import static org.zstack.core.Platform.operr;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  */
@@ -49,6 +53,9 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
     @Autowired
     private ThreadFacade thdf;
 
+    private String publicKey;
+    private String privateKey;
+
     private void placePip703() {
         File pip = PathUtil.findFileOnClassPath("tools/pip-7.0.3.tar.gz");
         if (pip == null) {
@@ -63,16 +70,39 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
         ShellUtils.run(String.format("yes | cp %s %s", pip.getAbsolutePath(), filesDir));
     }
 
+    private void placeAnsible196() {
+        File ansible = PathUtil.findFileOnClassPath("tools/ansible-1.9.6.tar.gz");
+        if (ansible == null) {
+            throw new CloudRuntimeException(String.format("cannot find tools/ansible-1.9.6.tar.gz on classpath"));
+        }
+
+        File root = new File(filesDir);
+        if (!root.exists()) {
+            root.mkdirs();
+        }
+
+        ShellUtils.run(String.format("yes | cp %s %s", ansible.getAbsolutePath(), filesDir));
+    }
+
     void init() {
         if (CoreGlobalProperty.UNIT_TEST_ON) {
-            logger.debug(String.format("skip AnsibleFacade init as it's unittest"));
+            logger.debug("skip AnsibleFacade init as it's unittest");
             return;
         }
 
         File privKeyFile = PathUtil.findFileOnClassPath(AnsibleConstant.RSA_PRIVATE_KEY, true);
         ShellUtils.run(String.format("chmod 600 %s", privKeyFile.getAbsolutePath()));
 
+        File pubKeyFile = PathUtil.findFileOnClassPath(AnsibleConstant.RSA_PUBLIC_KEY);
+
         try {
+            publicKey = FileUtils.readFileToString(pubKeyFile);
+            publicKey = publicKey.trim();
+            publicKey = StringDSL.stripEnd(publicKey, "\n");
+            privateKey = FileUtils.readFileToString(privKeyFile);
+            privateKey = privateKey.trim();
+            privateKey = StringDSL.stripEnd(privateKey, "\n");
+
             File invFile = new File(AnsibleConstant.CONFIGURATION_FILE);
             File invDir = new File(invFile.getParent());
             if (!invDir.exists()) {
@@ -88,7 +118,12 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
             ini.put("defaults", "inventory", AnsibleConstant.INVENTORY_FILE);
             for (Map.Entry<String, String> e : cfgs.entrySet()) {
                 String key = StringDSL.stripStart(e.getKey(), "Ansible.cfg.");
-                ini.put("defaults", key, e.getValue());
+                if (!key.contains(".")) {
+                    ini.put("defaults", key, e.getValue());
+                } else {
+                    String[] pair = key.split("\\.", 2);
+                    ini.put(pair[0], pair[1], e.getValue());
+                }
                 logger.debug(String.format("added ansible cfg[%s=%s] to %s", key, e.getValue(), AnsibleConstant.CONFIGURATION_FILE));
             }
             ini.store();
@@ -101,7 +136,19 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
             }
 
             placePip703();
-            deployModule("ansible/zstacklib", "zstacklib.yaml");
+            placeAnsible196();
+
+            ShellUtils.run(String.format("if ! ansible --version | grep -q 1.9.6; then " +
+                    "if grep -i -s centos /etc/system-release; then " +
+                    "sudo yum remove -y ansible; " +
+                    "elif grep -i -s ubuntu /etc/issue; then " +
+                    "sudo apt-get --assume-yes remove ansible; " +
+                    "else echo \"Warning: can't remove ansible from unknown platform\"; " +
+                    "fi; " +
+                    "sudo pip install -i file://%s --trusted-host localhost -I ansible==1.9.6; " +
+                    "fi", AnsibleConstant.PYPI_REPO), false);
+
+            deployModule("ansible/zstacklib", "zstacklib.py");
         } catch (IOException e) {
             throw new CloudRuntimeException(e);
         }
@@ -137,7 +184,7 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
             private void run(Completion completion) {
                 new PrepareAnsible().setTargetIp(msg.getTargetIp()).prepare();
 
-                logger.debug(String.format("start running ansible for playbook[%s]", msg.getPlayBookName()));
+                logger.debug(String.format("start running ansible for playbook[%s]", msg.getPlayBookPath()));
                 Map<String, Object> arguments = new HashMap<String, Object>();
                 if (msg.getArguments() != null) {
                     arguments.putAll(msg.getArguments());
@@ -146,30 +193,44 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
                 arguments.put("zstack_root", AnsibleGlobalProperty.ZSTACK_ROOT);
                 arguments.put("pkg_zstacklib", AnsibleGlobalProperty.ZSTACKLIB_PACKAGE_NAME);
                 arguments.putAll(getVariables());
-                String playBookPath = PathUtil.join(AnsibleConstant.ROOT_DIR, msg.getPlayBookName());
+                String playBookPath = msg.getPlayBookPath();
+                if ( ! playBookPath.contains("py")) {
+                   arguments.put("ansible_ssh_user", arguments.get("remote_user"));
+                   arguments.put("ansible_ssh_port", arguments.get("remote_port"));
+                   arguments.put("ansible_ssh_pass", arguments.get("remote_pass"));
+                   arguments.remove("remote_user");
+                   arguments.remove("remote_pass");
+                   arguments.remove("remote_port");
+                   if  ( ! arguments.get("ansible_ssh_user").equals("root")) {
+                       arguments.put("ansible_become", "yes");
+                       arguments.put("become_user", "root");
+                       arguments.put("ansible_become_pass", arguments.get("ansible_ssh_pass"));
+                   }
+                }
+                String executable = msg.getAnsibleExecutable() == null ? AnsibleGlobalProperty.EXECUTABLE : msg.getAnsibleExecutable();
                 try {
                     String output;
                     if (AnsibleGlobalProperty.DEBUG_MODE2) {
-                        output = ShellUtils.run(String.format("%s %s -i %s -vvvv --private-key %s -e '%s' | tee -a %s",
-                                        AnsibleGlobalProperty.EXECUTABLE, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments), AnsibleConstant.LOG_PATH),
+                        output = ShellUtils.run(String.format("PYTHONPATH=%s %s %s -i %s -vvvv --private-key %s -e '%s' | tee -a %s",
+                                        AnsibleConstant.ZSTACKLIB_ROOT, executable, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments), AnsibleConstant.LOG_PATH),
                                 AnsibleConstant.ROOT_DIR);
                     } else if (AnsibleGlobalProperty.DEBUG_MODE) {
-                        output = ShellUtils.run(String.format("%s %s -i %s -vvvv --private-key %s -e '%s'",
-                                        AnsibleGlobalProperty.EXECUTABLE, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments)),
+                        output = ShellUtils.run(String.format("PYTHONPATH=%s %s %s -i %s -vvvv --private-key %s -e '%s'",
+                                        AnsibleConstant.ZSTACKLIB_ROOT, executable, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments)),
                                 AnsibleConstant.ROOT_DIR);
                     } else {
-                        output = ShellUtils.run(String.format("%s %s -i %s --private-key %s -e '%s'",
-                                        AnsibleGlobalProperty.EXECUTABLE, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments)),
+                        output = ShellUtils.run(String.format("PYTHONPATH=%s %s %s -i %s --private-key %s -e '%s'",
+                                        AnsibleConstant.ZSTACKLIB_ROOT, executable, playBookPath, AnsibleConstant.INVENTORY_FILE, msg.getPrivateKeyFile(), JSONObjectUtil.toJsonString(arguments)),
                                 AnsibleConstant.ROOT_DIR);
                     }
 
                     if (output.contains("skipping: no hosts matched")) {
-                        throw new OperationFailureException(errf.stringToOperationError(output));
+                        throw new OperationFailureException(operr(output));
                     }
 
                 } catch (ShellException se) {
                     logger.warn(se.getMessage(), se);
-                    throw new OperationFailureException(errf.stringToOperationError(se.getMessage()));
+                    throw new OperationFailureException(operr(se.getMessage()));
                 }
 
                 completion.success();
@@ -316,6 +377,7 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
             }
             FileUtils.copyDirectory(src, dest);
 
+
             boolean isPlaybookLinked = false;
             for (File f : dest.listFiles()) {
                 if (f.getName().equals(playBookName)) {
@@ -329,7 +391,8 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
                 }
             }
 
-            if (!isPlaybookLinked) {
+            // if playBookName=null, skip the deploy steps because the deploy is not independent
+            if (playBookName != null && !isPlaybookLinked) {
                 throw new IllegalArgumentException(String.format("cannot find playbook[%s] in module[%s], module files are%s", playBookName, modulePath, Arrays.asList(src.list())));
             }
 
@@ -342,7 +405,7 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
 
     @Override
     public boolean isModuleChanged(String playbookName) {
-        String moduleName = StringDSL.stripEnd(playbookName, ".yaml");
+        String moduleName = StringDSL.stripEnd(playbookName, ".py");
         Boolean ret = moduleChanges.get(moduleName);
         DebugUtils.Assert(ret != null, String.format("cannot find ansible module name[%s]", moduleName));
         if (ret) {
@@ -355,5 +418,15 @@ public class AnsibleFacadeImpl extends AbstractService implements AnsibleFacade 
     @Override
     public Map<String, String> getVariables() {
         return variables;
+    }
+
+    @Override
+    public String getPublicKey() {
+        return publicKey;
+    }
+
+    @Override
+    public String getPrivateKey() {
+        return privateKey;
     }
 }

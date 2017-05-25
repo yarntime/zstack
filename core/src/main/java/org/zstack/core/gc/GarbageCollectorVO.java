@@ -1,5 +1,7 @@
 package org.zstack.core.gc;
 
+import org.zstack.header.vo.ResourceVO;
+
 import javax.persistence.*;
 import java.sql.Timestamp;
 
@@ -8,11 +10,9 @@ import java.sql.Timestamp;
  */
 @Entity
 @Table
-public class GarbageCollectorVO {
-    @Id
+public class GarbageCollectorVO extends ResourceVO {
     @Column
-    @GeneratedValue(strategy= GenerationType.IDENTITY)
-    private long id;
+    private String name;
 
     @Column
     private String runnerClass;
@@ -28,17 +28,28 @@ public class GarbageCollectorVO {
     private String managementNodeUuid;
 
     @Column
+    private String type;
+
+    @Column
     private Timestamp createDate;
 
     @Column
     private Timestamp lastOpDate;
 
-    public long getId() {
-        return id;
+    public String getName() {
+        return name;
     }
 
-    public void setId(long id) {
-        this.id = id;
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
     }
 
     public String getRunnerClass() {

@@ -1,6 +1,9 @@
 package org.zstack.network.securitygroup;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
+import java.sql.Timestamp;
 
 /**
  *@apiResult
@@ -31,6 +34,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse(allTo = "inventory")
 public class APIChangeSecurityGroupStateEvent extends APIEvent {
     /**
      * @desc :ref:`SecurityGroupInventory`
@@ -52,4 +56,19 @@ public class APIChangeSecurityGroupStateEvent extends APIEvent {
     public void setInventory(SecurityGroupInventory inventory) {
         this.inventory = inventory;
     }
+ 
+    public static APIChangeSecurityGroupStateEvent __example__() {
+        APIChangeSecurityGroupStateEvent event = new APIChangeSecurityGroupStateEvent();
+        SecurityGroupInventory sec = new SecurityGroupInventory();
+        sec.setUuid(uuid());
+        sec.setName("web");
+        sec.setDescription("for test");
+        sec.setState("Enabled");
+        sec.setCreateDate(new Timestamp(System.currentTimeMillis()));
+        sec.setLastOpDate(new Timestamp(System.currentTimeMillis()));
+        event.setInventory(sec);
+        event.setSuccess(true);
+        return event;
+    }
+
 }

@@ -18,6 +18,7 @@ import org.zstack.test.storage.backup.sftp.TestSftpBackupStorageDeleteImage2;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
+@Deprecated
 public class TestRebootVmOnKvmExtensionPoint {
     CLogger logger = Utils.getLogger(TestSftpBackupStorageDeleteImage2.class);
     Deployer deployer;
@@ -44,13 +45,13 @@ public class TestRebootVmOnKvmExtensionPoint {
         ext = loader.getComponent(KVMRebootVmExtension.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException {
-	    VmInstanceInventory vm = deployer.vms.get("TestVm");
-	    api.rebootVmInstance(vm.getUuid());
-	    Assert.assertTrue(ext.beforeCalled);
-	    Assert.assertTrue(ext.successCalled);
-	    Assert.assertFalse(ext.failCalled);
-	}
+
+    @Test
+    public void test() throws ApiSenderException {
+        VmInstanceInventory vm = deployer.vms.get("TestVm");
+        api.rebootVmInstance(vm.getUuid());
+        Assert.assertTrue(ext.beforeCalled);
+        Assert.assertTrue(ext.successCalled);
+        Assert.assertFalse(ext.failCalled);
+    }
 }

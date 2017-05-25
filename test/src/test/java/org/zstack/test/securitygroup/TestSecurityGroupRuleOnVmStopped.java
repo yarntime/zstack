@@ -7,6 +7,7 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmNicInventory;
+import org.zstack.header.vm.VmNicVO;
 import org.zstack.network.securitygroup.SecurityGroupInventory;
 import org.zstack.network.securitygroup.SecurityGroupRuleTO;
 import org.zstack.simulator.SimulatorSecurityGroupBackend;
@@ -21,16 +22,11 @@ import org.zstack.utils.logging.CLogger;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 
  * @author frank
- *
- * @condition
- * 1. create a security group
+ * @condition 1. create a security group
  * 2. create a vm and add to security group
  * 3. stop vm
- * 
- * @test
- * confirm rules are cleaned on vm
+ * @test confirm rules are cleaned on vm
  */
 public class TestSecurityGroupRuleOnVmStopped {
     static CLogger logger = Utils.getLogger(TestSecurityGroupRuleOnVmStopped.class);
@@ -51,7 +47,7 @@ public class TestSecurityGroupRuleOnVmStopped {
         dbf = loader.getComponent(DatabaseFacade.class);
         sbkd = loader.getComponent(SimulatorSecurityGroupBackend.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         SecurityGroupInventory scinv = deployer.securityGroups.get("test");
@@ -63,7 +59,8 @@ public class TestSecurityGroupRuleOnVmStopped {
         api.stopVmInstance(vm.getUuid());
         TimeUnit.SECONDS.sleep(3);
 
-        SecurityGroupRuleTO to = sbkd.getRulesOnHost(vm.getHostUuid(), vmNic.getInternalName());
+        VmNicVO vmnicvo = dbf.findByUuid(vmNic.getUuid(), VmNicVO.class);
+        SecurityGroupRuleTO to = sbkd.getRulesOnHost(vm.getHostUuid(), vmnicvo.getInternalName());
         Assert.assertEquals(0, to.getRules().size());
         Assert.assertEquals(SecurityGroupRuleTO.ACTION_CODE_DELETE_CHAIN, to.getActionCode());
     }

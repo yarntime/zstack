@@ -1,6 +1,12 @@
 package org.zstack.storage.primary.nfs;
 
+import org.springframework.http.HttpMethod;
+import org.zstack.header.rest.RestRequest;
+import org.zstack.header.storage.primary.APIAddPrimaryStorageEvent;
 import org.zstack.header.storage.primary.APIAddPrimaryStorageMsg;
+import org.zstack.header.storage.primary.PrimaryStorageVO;
+import org.zstack.header.tag.TagResourceType;
+
 /**
  * @api
  *
@@ -46,6 +52,13 @@ import org.zstack.header.storage.primary.APIAddPrimaryStorageMsg;
  *
  * see :ref:`APIAddNfsPrimaryStorageEvent`
  */
+@TagResourceType(PrimaryStorageVO.class)
+@RestRequest(
+        path = "/primary-storage/nfs",
+        method = HttpMethod.POST,
+        responseClass = APIAddPrimaryStorageEvent.class,
+        parameterName = "params"
+)
 public class APIAddNfsPrimaryStorageMsg extends APIAddPrimaryStorageMsg {
     public APIAddNfsPrimaryStorageMsg() {
         this.setType(NfsPrimaryStorageConstant.NFS_PRIMARY_STORAGE_TYPE);
@@ -55,4 +68,14 @@ public class APIAddNfsPrimaryStorageMsg extends APIAddPrimaryStorageMsg {
     public String getType() {
         return NfsPrimaryStorageConstant.NFS_PRIMARY_STORAGE_TYPE;
     }
+ 
+    public static APIAddNfsPrimaryStorageMsg __example__() {
+        APIAddNfsPrimaryStorageMsg msg = new APIAddNfsPrimaryStorageMsg();
+
+        msg.setName("PS1");
+        msg.setUrl("192.168.0.25:/share/nfs");
+        msg.setZoneUuid(uuid());
+        return msg;
+    }
+
 }

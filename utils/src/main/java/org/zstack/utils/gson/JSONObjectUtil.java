@@ -11,7 +11,7 @@ public class JSONObjectUtil {
     private static final Gson prettyGson;
     
     static {
-        gson = new GsonUtil().create();
+        gson = new GsonBuilder().create();
         prettyGson = new GsonBuilder().setPrettyPrinting().create();
     }
     
@@ -24,7 +24,11 @@ public class JSONObjectUtil {
             JSONArray jarr = new JSONArray(content);
             for (int i=0; i<jarr.length(); i++) {
                 String objstr = jarr.getString(i);
-                c.add(gson.fromJson(objstr, clazz));
+                if (String.class != clazz) {
+                    c.add(gson.fromJson(objstr, clazz));
+                } else {
+                    c.add(objstr);
+                }
             }
             return (K) c;
         } catch (Exception e) {

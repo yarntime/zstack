@@ -7,6 +7,7 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.host.HostConstant;
 import org.zstack.header.message.MessageReply;
@@ -16,6 +17,8 @@ import org.zstack.utils.logging.CLogger;
 
 import java.util.List;
 import java.util.Map;
+
+import static org.zstack.core.progress.ProgressReportService.taskProgress;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class VmCreateOnHypervisorFlow implements Flow {
@@ -42,6 +45,8 @@ public class VmCreateOnHypervisorFlow implements Flow {
 
     @Override
     public void run(final FlowTrigger chain, final Map data) {
+        taskProgress("start on the hypervisor");
+
         final VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
 
         fireExtensions(spec);
@@ -63,7 +68,7 @@ public class VmCreateOnHypervisorFlow implements Flow {
     }
 
     @Override
-    public void rollback(final FlowTrigger trigger, Map data) {
+    public void rollback(final FlowRollback trigger, Map data) {
         if (!data.containsKey(SUCCESS)) {
             trigger.rollback();
             return;

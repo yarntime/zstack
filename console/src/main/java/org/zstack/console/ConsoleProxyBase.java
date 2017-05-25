@@ -4,7 +4,7 @@ import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.CoreGlobalProperty;
-import org.zstack.core.config.GlobalConfigFacade;
+import org.zstack.core.GlobalProperty;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.console.*;
 import org.zstack.header.console.ConsoleProxyCommands.DeleteProxyCmd;
@@ -21,8 +21,9 @@ import org.zstack.utils.URLBuilder;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import java.net.URI;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Created with IntelliJ IDEA.
@@ -64,11 +65,8 @@ public class ConsoleProxyBase implements ConsoleProxy {
         cmd.setVmUuid(self.getVmInstanceUuid());
         cmd.setTargetHostname(targetHostname);
         cmd.setTargetPort(targetPort);
-        if (!"0.0.0.0".equals(CoreGlobalProperty.CONSOLE_PROXY_OVERRIDDEN_IP)) {
-            cmd.setProxyHostname(CoreGlobalProperty.CONSOLE_PROXY_OVERRIDDEN_IP);
-        } else {
-            cmd.setProxyHostname(self.getProxyHostname());
-        }
+        cmd.setProxyHostname("0.0.0.0");
+        cmd.setProxyPort(CoreGlobalProperty.CONSOLE_PROXY_PORT);
         cmd.setScheme(self.getScheme());
         cmd.setToken(self.getToken());
         cmd.setIdleTimeout(timeout);
@@ -88,7 +86,7 @@ public class ConsoleProxyBase implements ConsoleProxy {
                     self.setProxyPort(ret.getProxyPort());
                     completion.success(self);
                 } else {
-                    completion.fail(errf.stringToOperationError(ret.getError()));
+                    completion.fail(operr(ret.getError()));
                 }
             }
 
@@ -96,7 +94,7 @@ public class ConsoleProxyBase implements ConsoleProxy {
             public Class<ConsoleProxyCommands.EstablishProxyRsp> getReturnClass() {
                 return ConsoleProxyCommands.EstablishProxyRsp.class;
             }
-        }, TimeUnit.SECONDS, 300);
+        });
     }
 
     @Override
@@ -139,9 +137,7 @@ public class ConsoleProxyBase implements ConsoleProxy {
                 if (ret.isSuccess()) {
                     completion.success(ret.getAvailable());
                 } else {
-                    String err = String.format("unable to check console proxy availability, because %s", ret.getError());
-                    logger.warn(err);
-                    completion.fail(errf.stringToOperationError(err));
+                    completion.fail(operr("unable to check console proxy availability, because %s", ret.getError()));
                 }
             }
 
@@ -150,7 +146,7 @@ public class ConsoleProxyBase implements ConsoleProxy {
                 return ConsoleProxyCommands.CheckAvailabilityRsp.class;
             }
 
-        }, TimeUnit.SECONDS, 300);
+        });
     }
 
     @Override
@@ -175,7 +171,7 @@ public class ConsoleProxyBase implements ConsoleProxy {
                         if (ret.isSuccess()) {
                             completion.success();
                         } else {
-                            completion.fail(errf.stringToOperationError(ret.getError()));
+                            completion.fail(operr(ret.getError()));
                         }
                     }
 

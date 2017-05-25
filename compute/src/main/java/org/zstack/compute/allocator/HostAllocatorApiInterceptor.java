@@ -5,16 +5,19 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.allocator.APIGetCpuMemoryCapacityMsg;
 import org.zstack.header.allocator.APIGetCpuMemoryCapacityReply;
 import org.zstack.header.allocator.HostAllocatorConstant;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.apimediator.StopRoutingException;
+import org.zstack.header.errorcode.SysErrors;
+import org.zstack.header.image.APIGetCandidateBackupStorageForCreatingImageMsg;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.zone.ZoneVO;
 import org.zstack.header.zone.ZoneVO_;
+
+import static org.zstack.core.Platform.argerr;
 
 import java.util.List;
 
@@ -40,10 +43,20 @@ public class HostAllocatorApiInterceptor implements ApiMessageInterceptor {
     public APIMessage intercept(APIMessage msg) throws ApiMessageInterceptionException {
         if (msg instanceof APIGetCpuMemoryCapacityMsg) {
             validate((APIGetCpuMemoryCapacityMsg) msg);
+        } else if (msg instanceof APIGetCandidateBackupStorageForCreatingImageMsg) {
+            validate((APIGetCandidateBackupStorageForCreatingImageMsg) msg);
         }
 
         setServiceId(msg);
         return msg;
+    }
+
+    private void validate(APIGetCandidateBackupStorageForCreatingImageMsg msg) {
+        if (msg.getVolumeSnapshotUuid() == null && msg.getVolumeUuid() == null) {
+            throw new ApiMessageInterceptionException(argerr(
+                    "either volumeUuid or volumeSnapshotUuid must be set"
+            ));
+        }
     }
 
     private void validate(APIGetCpuMemoryCapacityMsg msg) {
@@ -59,9 +72,7 @@ public class HostAllocatorApiInterceptor implements ApiMessageInterceptor {
         }
 
         if (!pass && !msg.isAll()) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("zoneUuids, clusterUuids, hostUuids must at least have one be none-empty list, or all is set to true")
-            ));
+            throw new ApiMessageInterceptionException(argerr("zoneUuids, clusterUuids, hostUuids must at least have one be none-empty list, or all is set to true"));
         }
 
         if (msg.isAll() && (msg.getZoneUuids() == null || msg.getZoneUuids().isEmpty())) {

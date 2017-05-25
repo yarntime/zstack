@@ -5,8 +5,8 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.rest.JsonAsyncRESTCallback;
 import org.zstack.header.rest.RESTFacade;
 import org.zstack.test.WebBeanConstructor;
@@ -24,7 +24,7 @@ public class TestRestAsyncCallbackMissingTaskUuid {
     String url;
     CountDownLatch latch = new CountDownLatch(1);
     boolean success = false;
-    
+
     @Before
     public void setUp() throws Exception {
         wbean = new WebBeanConstructor();
@@ -38,7 +38,7 @@ public class TestRestAsyncCallbackMissingTaskUuid {
     public void test() throws InterruptedException {
         String url = wbean.buildUrl(RESTBeanForTest.ROOT, RESTBeanForTest.CALLBACK_MISSING_TASKUUID_PATH);
         final String hi = "hello";
-        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<String>() {
+        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<String>(null) {
 
             @Override
             public void fail(ErrorCode err) {
@@ -62,15 +62,15 @@ public class TestRestAsyncCallbackMissingTaskUuid {
             public Class<String> getReturnClass() {
                 return String.class;
             }
-            
+
         }, TimeUnit.SECONDS, 5);
         latch.await(1, TimeUnit.MINUTES);
         Assert.assertTrue(success);
     }
-    
+
     @After
     public void tearDown() {
-        wbean.stopTomcat();
+        wbean.stopJetty();
     }
 
 }

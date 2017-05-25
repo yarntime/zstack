@@ -20,4 +20,15 @@ public class APIReconnectSftpBackupStorageEvent extends APIEvent {
     public void setInventory(SftpBackupStorageInventory inventory) {
         this.inventory = inventory;
     }
+ 
+    public static APIReconnectSftpBackupStorageEvent __example__() {
+        APIReconnectSftpBackupStorageEvent event = new APIReconnectSftpBackupStorageEvent();
+        SftpBackupStorageInventory inventory = new SftpBackupStorageInventory();
+        inventory.setUsername("tester");
+        inventory.setHostname("192.168.0.1");
+        inventory.setSshPort(8000);
+
+        return event;
+    }
+
 }

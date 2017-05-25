@@ -13,12 +13,12 @@ import org.zstack.header.storage.snapshot.*;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.volume.VolumeVO;
 import org.zstack.simulator.kvm.VolumeSnapshotKvmSimulator;
+import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -62,7 +62,7 @@ public class TestSnapshotOnKvm13 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -91,8 +91,8 @@ public class TestSnapshotOnKvm13 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
         BackupStorageInventory bs = deployer.backupStorages.get("sftp");
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         String volUuid = vm.getRootVolumeUuid();
@@ -119,7 +119,7 @@ public class TestSnapshotOnKvm13 {
         Assert.assertEquals(bs.getUuid(), ref.getBackupStorageUuid());
         Assert.assertNotNull(ref.getInstallPath());
 
-        long count =  dbf.count(VolumeSnapshotBackupStorageRefVO.class);
+        long count = dbf.count(VolumeSnapshotBackupStorageRefVO.class);
         Assert.assertEquals(4, count);
 
         SimpleQuery<VolumeSnapshotBackupStorageRefVO> q = dbf.createQuery(VolumeSnapshotBackupStorageRefVO.class);

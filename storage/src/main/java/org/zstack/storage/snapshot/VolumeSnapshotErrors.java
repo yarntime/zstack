@@ -7,7 +7,7 @@ public enum VolumeSnapshotErrors {
 
     private String code;
 
-    private VolumeSnapshotErrors(int id) {
+    VolumeSnapshotErrors(int id) {
         code = String.format("VOLUME_SNAPSHOT.%s", id);
     }
 

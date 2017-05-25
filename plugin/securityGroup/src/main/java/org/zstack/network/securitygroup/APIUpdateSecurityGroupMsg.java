@@ -1,13 +1,23 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * Created by frank on 6/15/2015.
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/{uuid}/actions",
+        method = HttpMethod.PUT,
+        isAction = true,
+        responseClass = APIUpdateSecurityGroupEvent.class
+)
 public class APIUpdateSecurityGroupMsg extends APIMessage implements SecurityGroupMessage {
     @APIParam(resourceType = SecurityGroupVO.class, checkAccount = true, operationTarget = true)
     private String uuid;
@@ -44,4 +54,27 @@ public class APIUpdateSecurityGroupMsg extends APIMessage implements SecurityGro
     public String getSecurityGroupUuid() {
         return uuid;
     }
+ 
+    public static APIUpdateSecurityGroupMsg __example__() {
+        APIUpdateSecurityGroupMsg msg = new APIUpdateSecurityGroupMsg();
+        msg.setUuid(uuid());
+        msg.setName("new sg");
+        msg.setDescription("for test update");
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Updated").resource(uuid,SecurityGroupVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

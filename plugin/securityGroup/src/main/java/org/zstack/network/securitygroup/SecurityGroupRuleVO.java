@@ -1,20 +1,15 @@
 package org.zstack.network.securitygroup;
 
-import org.zstack.header.search.TriggerIndex;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @Entity
 @Table
-@TriggerIndex
-public class SecurityGroupRuleVO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class SecurityGroupRuleVO extends ResourceVO {
     @Column
     @ForeignKey(parentEntityClass = SecurityGroupVO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String securityGroupUuid;
@@ -46,20 +41,17 @@ public class SecurityGroupRuleVO {
     @Column
     private Timestamp lastOpDate;
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
     public SecurityGroupRuleState getState() {
         return state;
     }
 
     public void setState(SecurityGroupRuleState state) {
         this.state = state;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getSecurityGroupUuid() {

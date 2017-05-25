@@ -1,10 +1,11 @@
 package org.zstack.header.host;
 
-import org.zstack.header.message.APIReply;
 import org.zstack.header.query.APIQueryReply;
+import org.zstack.header.rest.RestResponse;
 
 import java.util.List;
 
+@RestResponse(allTo = "inventories")
 public class APIQueryHostReply extends APIQueryReply {
     private List<HostInventory> inventories;
 
@@ -15,4 +16,12 @@ public class APIQueryHostReply extends APIQueryReply {
     public void setInventories(List<HostInventory> inventories) {
         this.inventories = inventories;
     }
+ 
+    public static APIQueryHostReply __example__() {
+        APIQueryHostReply reply = new APIQueryHostReply();
+
+
+        return reply;
+    }
+
 }

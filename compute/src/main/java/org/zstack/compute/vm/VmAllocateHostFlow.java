@@ -7,18 +7,22 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.core.workflow.Flow;
-import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.allocator.*;
 import org.zstack.header.configuration.DiskOfferingInventory;
 import org.zstack.header.configuration.DiskOfferingVO;
+import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
+import org.zstack.header.core.workflow.FlowTrigger;
+import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.host.HostInventory;
 import org.zstack.header.image.ImageConstant.ImageMediaType;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.vm.VmInstanceConstant;
+import org.zstack.header.vm.VmInstanceConstant.VmOperation;
 import org.zstack.header.vm.VmInstanceSpec;
+import org.zstack.header.vm.VmInstanceVO;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.function.Function;
 
@@ -26,6 +30,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import static org.zstack.core.progress.ProgressReportService.taskProgress;
+
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class VmAllocateHostFlow implements Flow {
     @Autowired
@@ -48,7 +55,7 @@ public class VmAllocateHostFlow implements Flow {
 
         DesignatedAllocateHostMsg msg = new DesignatedAllocateHostMsg();
 
-        List<DiskOfferingInventory> diskOfferings = new ArrayList<DiskOfferingInventory>();
+        List<DiskOfferingInventory> diskOfferings = new ArrayList<>();
         ImageInventory image = spec.getImageSpec().getInventory();
         long diskSize;
         if (image.getMediaType().equals(ImageMediaType.ISO.toString())) {
@@ -62,7 +69,7 @@ public class VmAllocateHostFlow implements Flow {
         diskOfferings.addAll(spec.getDataDiskOfferings());
         msg.setDiskOfferings(diskOfferings);
         msg.setDiskSize(diskSize);
-        msg.setCpuCapacity(spec.getVmInventory().getCpuNum() * spec.getVmInventory().getCpuSpeed());
+        msg.setCpuCapacity(spec.getVmInventory().getCpuNum());
         msg.setMemoryCapacity(spec.getVmInventory().getMemorySize());
         msg.setL3NetworkUuids(CollectionUtils.transformToList(spec.getL3Networks(), new Function<String, L3NetworkInventory>() {
             @Override
@@ -87,22 +94,44 @@ public class VmAllocateHostFlow implements Flow {
         } else {
             msg.setAllocatorStrategy(spec.getVmInventory().getAllocatorStrategy());
         }
+        if (spec.getRequiredPrimaryStorageUuidForRootVolume() != null) {
+            msg.setRequiredPrimaryStorageUuid(spec.getRequiredPrimaryStorageUuidForRootVolume());
+        }
         msg.setServiceId(bus.makeLocalServiceId(HostAllocatorConstant.SERVICE_ID));
         msg.setTimeout(TimeUnit.MINUTES.toMillis(60));
         msg.setVmInstance(spec.getVmInventory());
+        msg.setRequiredBackupStorageUuid(spec.getImageSpec().getSelectedBackupStorage().getBackupStorageUuid());
         return msg;
     }
 
     @Override
     public void run(final FlowTrigger chain, Map data) {
+        taskProgress("allocate candidate hosts");
+
         final VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
+
+        if (VmOperation.NewCreate != spec.getCurrentVmOperation()) {
+            throw new CloudRuntimeException("VmAllocateHostFlow is only for creating new VM");
+        }
+
         AllocateHostMsg msg = this.prepareMsg(data);
+
         bus.send(msg, new CloudBusCallBack(chain) {
             @Override
             public void run(MessageReply reply) {
                 if (reply.isSuccess()) {
                     AllocateHostReply areply = (AllocateHostReply) reply;
                     spec.setDestHost(areply.getHost());
+
+                    // update the vm's host uuid and hypervisor type so even if the management node died later and the vm's state
+                    // is stuck in Starting, we know which host it's created on and can check its state on the host
+                    VmInstanceVO vmvo = dbf.findByUuid(spec.getVmInventory().getUuid(), VmInstanceVO.class);
+                    vmvo.setClusterUuid(spec.getDestHost().getClusterUuid());
+                    vmvo.setLastHostUuid(vmvo.getHostUuid());
+                    vmvo.setHostUuid(spec.getDestHost().getUuid());
+                    vmvo.setHypervisorType(spec.getDestHost().getHypervisorType());
+                    dbf.update(vmvo);
+
                     chain.next();
                 } else {
                     chain.fail(reply.getError());
@@ -112,14 +141,14 @@ public class VmAllocateHostFlow implements Flow {
     }
 
     @Override
-    public void rollback(FlowTrigger chain, Map data) {
+    public void rollback(FlowRollback chain, Map data) {
         VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
         HostInventory host = spec.getDestHost();
         if (host != null) {
             ReturnHostCapacityMsg msg = new ReturnHostCapacityMsg();
-            msg.setCpuCapacity(spec.getVmInventory().getCpuNum()*spec.getVmInventory().getCpuSpeed());
+            msg.setCpuCapacity(spec.getVmInventory().getCpuNum());
             msg.setMemoryCapacity(spec.getVmInventory().getMemorySize());
-            msg.setHost(host);
+            msg.setHostUuid(host.getUuid());
             msg.setServiceId(bus.makeLocalServiceId(HostAllocatorConstant.SERVICE_ID));
             bus.send(msg);
         }

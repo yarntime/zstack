@@ -1,12 +1,23 @@
 package org.zstack.header.network.l3;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APICreateMessage;
+import org.zstack.header.message.APIEvent;
+import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  */
 @Action(category = L3NetworkConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/l3-networks/{l3NetworkUuid}/ip-ranges/by-cidr",
+        method = HttpMethod.POST,
+        parameterName = "params",
+        responseClass = APIAddIpRangeByNetworkCidrEvent.class
+)
 public class APIAddIpRangeByNetworkCidrMsg extends APICreateMessage implements L3NetworkMessage {
     @APIParam(maxLength = 255)
     private String name;
@@ -49,4 +60,27 @@ public class APIAddIpRangeByNetworkCidrMsg extends APICreateMessage implements L
     public void setDescription(String description) {
         this.description = description;
     }
+ 
+    public static APIAddIpRangeByNetworkCidrMsg __example__() {
+        APIAddIpRangeByNetworkCidrMsg msg = new APIAddIpRangeByNetworkCidrMsg();
+
+        msg.setName("Test-IPRange");
+        msg.setL3NetworkUuid(uuid());
+        msg.setNetworkCidr("192.168.10.0/24");
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                ntfy("Added an IP range[%s]", networkCidr).resource(l3NetworkUuid, L3NetworkVO.class.getSimpleName())
+                        .messageAndEvent(that, evt).done();
+            }
+        };
+    }
+
 }

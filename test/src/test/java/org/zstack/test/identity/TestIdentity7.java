@@ -10,10 +10,8 @@ import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.header.identity.*;
 import org.zstack.header.identity.AccountConstant.StatementEffect;
 import org.zstack.header.identity.PolicyInventory.Statement;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.header.query.QueryOp;
+import org.zstack.test.*;
 import org.zstack.test.deployer.Deployer;
 
 /**
@@ -21,26 +19,25 @@ import org.zstack.test.deployer.Deployer;
  * 2. create a policy
  * 3. attach the policy to the user
  * 4. delete the user
- *
+ * <p>
  * confirm the policy is detached
- *
+ * <p>
  * 5. create another user
  * 6. attach the policy to the user
  * 7. delete the policy
- *
+ * <p>
  * confirm the policy is detached
- *
+ * <p>
  * 8. create a group and a policy
  * 9. attach the policy to the group
  * 10. delete the group
- *
+ * <p>
  * confirm the policy is detached
- *
+ * <p>
  * 11. create another group and attach the policy
  * 12. delete the policy
- *
+ * <p>
  * confirm the policy is detached
- *
  */
 public class TestIdentity7 {
     Deployer deployer;
@@ -51,7 +48,7 @@ public class TestIdentity7 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
@@ -87,6 +84,13 @@ public class TestIdentity7 {
         UserGroupInventory g = creator.createGroup("group");
         p = creator.createPolicy("policy", s);
         creator.attachPolicyToGroup("group", "policy");
+
+        APIQueryPolicyMsg msg = new APIQueryPolicyMsg();
+        msg.addQueryCondition("group.uuid", QueryOp.EQ, g.getUuid());
+        APIQueryPolicyReply reply = api.query(msg, APIQueryPolicyReply.class, creator.getAccountSession());
+        Assert.assertEquals(1, reply.getInventories().size());
+        PolicyInventory retp = reply.getInventories().get(0);
+        Assert.assertEquals("policy", retp.getName());
 
         SimpleQuery<UserGroupPolicyRefVO> pq = dbf.createQuery(UserGroupPolicyRefVO.class);
         pq.add(UserGroupPolicyRefVO_.policyUuid, Op.EQ, p.getUuid());

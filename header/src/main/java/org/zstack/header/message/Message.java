@@ -1,6 +1,7 @@
 package org.zstack.header.message;
 
 import com.rabbitmq.client.AMQP.BasicProperties;
+import org.apache.logging.log4j.ThreadContext;
 import org.zstack.header.core.AsyncBackup;
 import org.zstack.header.rest.APINoSee;
 import org.zstack.utils.DebugUtils;
@@ -16,36 +17,39 @@ public abstract class Message implements Serializable, AsyncBackup {
     /**
      * @ignore
      */
-	@GsonTransient
-	@APINoSee
+    @GsonTransient
+    @APINoSee
     @NoJsonSchema
     private transient MessageProperties props;
     /**
      * @ignore
      */
-	@APINoSee
+    @APINoSee
     @NoJsonSchema
-	private Map<String, Object> headers = new LinkedHashMap<String, Object>();
+    private Map<String, Object> headers = new LinkedHashMap<String, Object>();
     /**
      * @ignore
      */
-	@APINoSee
+    @APINoSee
     private String id;
     /**
      * @ignore
      */
-	@APINoSee
+    @APINoSee
     private String serviceId;
     /**
      * @ignore
      */
-	@APINoSee
-    private long creatingTime;
-    
-    
+    @APINoSee
+    private long createdTime;
+
+    protected static String uuid() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
     public Message() {
-        creatingTime = System.currentTimeMillis();
-        id = UUID.randomUUID().toString().replace("-", "");
+        createdTime = System.currentTimeMillis();
+        id = uuid();
     }
 
     public Map<String, Object> getHeaders() {
@@ -57,11 +61,11 @@ public abstract class Message implements Serializable, AsyncBackup {
     }
 
     public void putHeaderEntry(String key, Object value) {
-		headers.put(key, value);
-	}
+        headers.put(key, value);
+    }
 
     public <T> T getHeaderEntry(String key) {
-        return (T)headers.get(key);
+        return (T) headers.get(key);
     }
 
     public BasicProperties getAMQPProperties() {
@@ -88,7 +92,7 @@ public abstract class Message implements Serializable, AsyncBackup {
     public String getId() {
         return id;
     }
-    
+
     public void setId(String id) {
         this.id = id;
     }
@@ -101,25 +105,25 @@ public abstract class Message implements Serializable, AsyncBackup {
         this.serviceId = serviceId;
     }
 
-    public long getCreatingTime() {
-        return creatingTime;
+    public long getCreatedTime() {
+        return createdTime;
     }
 
     public String getMessageName() {
         return this.getClass().getCanonicalName();
     }
-    
+
     @Override
     public boolean equals(Object t) {
-    	if (t == null || !(t instanceof Message)) {
-    		return false;
-    	}
-    	
-    	return ((Message)t).getId().equals(getId());
+        if (t == null || !(t instanceof Message)) {
+            return false;
+        }
+
+        return ((Message) t).getId().equals(getId());
     }
-    
+
     @Override
     public int hashCode() {
-    	return getId().hashCode();
+        return getId().hashCode();
     }
 }

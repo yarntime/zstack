@@ -1,5 +1,14 @@
 package org.zstack.storage.primary.nfs;
+
+import org.zstack.header.core.ApiTimeout;
 import org.zstack.header.core.validation.Validation;
+import org.zstack.header.image.APICreateDataVolumeTemplateFromVolumeMsg;
+import org.zstack.header.image.APICreateRootVolumeTemplateFromRootVolumeMsg;
+import org.zstack.header.image.APICreateRootVolumeTemplateFromVolumeSnapshotMsg;
+import org.zstack.header.storage.snapshot.APIDeleteVolumeSnapshotMsg;
+import org.zstack.header.vm.APICreateVmInstanceMsg;
+import org.zstack.header.vm.APIExpungeVmInstanceMsg;
+import org.zstack.header.volume.APICreateDataVolumeFromVolumeSnapshotMsg;
 import org.zstack.kvm.KVMAgentCommands.AgentCommand;
 import org.zstack.kvm.KVMAgentCommands.AgentResponse;
 
@@ -43,7 +52,16 @@ public class NfsPrimaryStorageKVMBackendCommands {
     public static class MountCmd extends NfsPrimaryStorageAgentCommand {
         private String url;
         private String mountPath;
-        
+        private String options;
+
+        public String getOptions() {
+            return options;
+        }
+
+        public void setOptions(String options) {
+            this.options = options;
+        }
+
         public String getUrl() {
             return url;
         }
@@ -95,7 +113,11 @@ public class NfsPrimaryStorageKVMBackendCommands {
     }
     public static class UnmountResponse extends NfsPrimaryStorageAgentResponse {
     }
-    
+
+    @ApiTimeout(apiClasses = {
+            APICreateRootVolumeTemplateFromRootVolumeMsg.class,
+            APICreateDataVolumeTemplateFromVolumeMsg.class
+    })
     public static class CreateTemplateFromVolumeCmd extends NfsPrimaryStorageAgentCommand {
         private String installPath;
         private String rootVolumePath;
@@ -117,12 +139,27 @@ public class NfsPrimaryStorageKVMBackendCommands {
     public static class CreateTemplateFromVolumeRsp extends NfsPrimaryStorageAgentResponse {
     }
 
+    @ApiTimeout(apiClasses = {APICreateVmInstanceMsg.class})
     public static class DownloadBitsFromSftpBackupStorageCmd extends NfsPrimaryStorageAgentCommand {
         private String sshKey;
         private String hostname;
+        private String username;
+        private int sshPort;
         private String backupStorageInstallPath;
         private String primaryStorageInstallPath;
 
+        public String getUsername() {
+            return username;
+        }
+        public void setUsername(String username) {
+            this.username = username;
+        }
+        public int getSshPort() {
+            return sshPort;
+        }
+        public void setSshPort(int sshPort) {
+            this.sshPort = sshPort;
+        }
         public String getSshKey() {
             return sshKey;
         }
@@ -183,6 +220,7 @@ public class NfsPrimaryStorageKVMBackendCommands {
         }
     }
 
+    @ApiTimeout(apiClasses = {APICreateVmInstanceMsg.class})
     public static class CreateRootVolumeFromTemplateCmd extends NfsPrimaryStorageAgentCommand {
         private String templatePathInCache;
         private long timeout;
@@ -280,7 +318,8 @@ public class NfsPrimaryStorageKVMBackendCommands {
     }
     public static class CreateEmptyVolumeResponse extends NfsPrimaryStorageAgentResponse {
     }
-    
+
+    @ApiTimeout(apiClasses = {APICreateDataVolumeFromVolumeSnapshotMsg.class, APIExpungeVmInstanceMsg.class})
     public static class DeleteCmd extends NfsPrimaryStorageAgentCommand {
         private boolean isFolder;
         private String installPath;
@@ -334,8 +373,21 @@ public class NfsPrimaryStorageKVMBackendCommands {
         private String primaryStorageInstallPath;
         private String backupStorageInstallPath;
         private String backupStorageHostName;
+        private String backupStorageUserName;
         private String backupStorageSshKey;
-
+        private int backupStorageSshPort;
+        public String getBackupStorageUserName() {
+            return backupStorageUserName;
+        }
+        public void setBackupStorageUserName(String backupStorageUserName) {
+            this.backupStorageUserName = backupStorageUserName;
+        }
+        public void setBackupStorageSshPort(int backupStorageSshPort) {
+            this.backupStorageSshPort = backupStorageSshPort;
+        }
+        public int getBackupStorageSshPort() {
+            return backupStorageSshPort;
+        }
         public String getPrimaryStorageInstallPath() {
             return primaryStorageInstallPath;
         }
@@ -372,9 +424,22 @@ public class NfsPrimaryStorageKVMBackendCommands {
     public static class UploadToSftpResponse extends NfsPrimaryStorageAgentResponse {
     }
 
+    @ApiTimeout(apiClasses = {
+            APICreateDataVolumeFromVolumeSnapshotMsg.class,
+            APICreateRootVolumeTemplateFromVolumeSnapshotMsg.class
+    })
     public static class MergeSnapshotCmd extends NfsPrimaryStorageAgentCommand {
+        private String volumeUuid;
         private String snapshotInstallPath;
         private String workspaceInstallPath;
+
+        public String getVolumeUuid() {
+            return volumeUuid;
+        }
+
+        public void setVolumeUuid(String volumeUuid) {
+            this.volumeUuid = volumeUuid;
+        }
 
         public String getSnapshotInstallPath() {
             return snapshotInstallPath;
@@ -395,6 +460,15 @@ public class NfsPrimaryStorageKVMBackendCommands {
 
     public static class MergeSnapshotResponse extends NfsPrimaryStorageAgentResponse {
         private long size;
+        private long actualSize;
+
+        public long getActualSize() {
+            return actualSize;
+        }
+
+        public void setActualSize(long actualSize) {
+            this.actualSize = actualSize;
+        }
 
         public long getSize() {
             return size;
@@ -405,9 +479,22 @@ public class NfsPrimaryStorageKVMBackendCommands {
         }
     }
 
+    @ApiTimeout(apiClasses = {
+            APICreateDataVolumeFromVolumeSnapshotMsg.class,
+            APICreateRootVolumeTemplateFromVolumeSnapshotMsg.class
+    })
     public static class RebaseAndMergeSnapshotsCmd extends NfsPrimaryStorageAgentCommand {
+        private String volumeUuid;
         private List<String> snapshotInstallPaths;
         private String workspaceInstallPath;
+
+        public String getVolumeUuid() {
+            return volumeUuid;
+        }
+
+        public void setVolumeUuid(String volumeUuid) {
+            this.volumeUuid = volumeUuid;
+        }
 
         public List<String> getSnapshotInstallPaths() {
             return snapshotInstallPaths;
@@ -428,6 +515,15 @@ public class NfsPrimaryStorageKVMBackendCommands {
 
     public static class RebaseAndMergeSnapshotsResponse extends NfsPrimaryStorageAgentResponse {
         private long size;
+        private long actualSize;
+
+        public long getActualSize() {
+            return actualSize;
+        }
+
+        public void setActualSize(long actualSize) {
+            this.actualSize = actualSize;
+        }
 
         public long getSize() {
             return size;
@@ -462,6 +558,7 @@ public class NfsPrimaryStorageKVMBackendCommands {
     public static class MoveBitsRsp extends NfsPrimaryStorageAgentResponse {
     }
 
+    @ApiTimeout(apiClasses = {APIDeleteVolumeSnapshotMsg.class})
     public static class OfflineMergeSnapshotCmd extends NfsPrimaryStorageAgentCommand {
         private String srcPath;
         private String destPath;
@@ -495,5 +592,41 @@ public class NfsPrimaryStorageKVMBackendCommands {
     public static class OfflineMergeSnapshotRsp extends NfsPrimaryStorageAgentResponse {
     }
 
-    public static final String UNABLE_TO_FIND_IMAGE_IN_CACHE = "UNABLE_TO_FIND_IMAGE_IN_CACHE";
+    public static class RemountCmd extends NfsPrimaryStorageAgentCommand {
+        public String url;
+        public String mountPath;
+        public String options;
+    }
+
+    public static class GetVolumeActualSizeCmd extends NfsPrimaryStorageAgentCommand {
+        public String volumeUuid;
+        public String installPath;
+    }
+
+    public static class GetVolumeActualSizeRsp extends NfsPrimaryStorageAgentResponse {
+        public long actualSize;
+        public long size;
+    }
+
+    public static class PingCmd extends NfsPrimaryStorageAgentCommand {
+    }
+
+    public static class GetVolumeBaseImagePathCmd extends NfsPrimaryStorageAgentCommand {
+        public String volumeUUid;
+        public String installPath;
+    }
+
+    public static class GetVolumeBaseImagePathRsp extends NfsPrimaryStorageAgentResponse {
+        public String path;
+    }
+
+    public static class UpdateMountPointCmd extends NfsPrimaryStorageAgentCommand {
+        public String oldMountPoint;
+        public String newMountPoint;
+        public String mountPath;
+        public String options;
+    }
+
+    public static class UpdateMountPointRsp extends NfsPrimaryStorageAgentResponse {
+    }
 }

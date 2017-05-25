@@ -2,6 +2,7 @@ package org.zstack.appliancevm;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
+import org.zstack.appliancevm.ApplianceVmConstant.BootstrapParams;
 import org.zstack.core.CoreGlobalProperty;
 import org.zstack.core.Platform;
 import org.zstack.core.ansible.AnsibleFacade;
@@ -15,13 +16,12 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.job.JobQueueFacade;
-import org.zstack.header.core.workflow.Flow;
 import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.header.AbstractService;
 import org.zstack.header.Component;
-import org.zstack.header.configuration.ConfigurationConstant;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
+import org.zstack.header.core.workflow.Flow;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.host.HypervisorType;
@@ -163,7 +163,7 @@ public class ApplianceVmFacadeImpl extends AbstractService implements ApplianceV
 
     @Override
     public void destroyApplianceVm(String vmUuid) {
-        destroyApplianceVm(vmUuid, new ReturnValueCompletion<ApplianceVmInventory>() {
+        destroyApplianceVm(vmUuid, new ReturnValueCompletion<ApplianceVmInventory>(null) {
             @Override
             public void success(ApplianceVmInventory returnValue) {
             }
@@ -235,7 +235,8 @@ public class ApplianceVmFacadeImpl extends AbstractService implements ApplianceV
     @Override
     public Map<String, Object> prepareBootstrapInformation(VmInstanceSpec spec) {
         VmNicInventory mgmtNic = null;
-        String defaultL3Uuid = null;
+        String defaultL3Uuid;
+        int sshPort;
         if (spec.getCurrentVmOperation() == VmInstanceConstant.VmOperation.NewCreate) {
             ApplianceVmSpec aspec = spec.getExtensionData(ApplianceVmConstant.Params.applianceVmSpec.toString(), ApplianceVmSpec.class);
             for (VmNicInventory nic : spec.getDestNics()) {
@@ -247,11 +248,14 @@ public class ApplianceVmFacadeImpl extends AbstractService implements ApplianceV
 
             DebugUtils.Assert(mgmtNic!=null, String.format("cannot find management nic for appliance vm[uuid:%s]", aspec.getUuid()));
             defaultL3Uuid = aspec.getDefaultRouteL3Network() != null ? aspec.getDefaultRouteL3Network().getUuid() : mgmtNic.getL3NetworkUuid();
+            sshPort = aspec.getSshPort();
         } else {
             ApplianceVmVO avo = dbf.findByUuid(spec.getVmInventory().getUuid(), ApplianceVmVO.class);
             ApplianceVmInventory ainv = ApplianceVmInventory.valueOf(avo);
             mgmtNic = ainv.getManagementNic();
             defaultL3Uuid = ainv.getDefaultRouteL3NetworkUuid();
+            //TODO: make it configurable
+            sshPort = 22;
         }
 
         Map<String, Object> ret = new HashMap<String, Object>();
@@ -292,9 +296,13 @@ public class ApplianceVmFacadeImpl extends AbstractService implements ApplianceV
             deviceId ++;
         }
 
-        String publicKey = gcf.getConfigValue(ConfigurationConstant.GlobalConfig.publicKey.getCategory(),
-                ConfigurationConstant.GlobalConfig.publicKey.toString(), String.class);
+        String publicKey = asf.getPublicKey();
         ret.put(ApplianceVmConstant.BootstrapParams.publicKey.toString(), publicKey);
+        ret.put(BootstrapParams.sshPort.toString(), sshPort);
+
+        for (ApplianceVmPrepareBootstrapInfoExtensionPoint ext : pluginRgty.getExtensionList(ApplianceVmPrepareBootstrapInfoExtensionPoint.class)) {
+            ext.applianceVmPrepareBootstrapInfo(spec, ret);
+        }
 
         return ret;
     }

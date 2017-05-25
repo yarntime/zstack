@@ -16,7 +16,6 @@ import org.zstack.header.vm.APICreateVmInstanceEvent;
 import org.zstack.header.vm.APICreateVmInstanceMsg;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceInventory;
-import org.zstack.header.zone.ZoneInventory;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSender;
 import org.zstack.test.ApiSenderException;
@@ -87,7 +86,7 @@ public class TestDesignatedHostAllocationStrategy2 {
 
     @Test
     public void test() throws ApiSenderException {
-        L3NetworkInventory l3  = deployer.l3Networks.get("l3Network1");
+        L3NetworkInventory l3 = deployer.l3Networks.get("l3Network1");
         InstanceOfferingInventory instanceOffering = deployer.instanceOfferings.get("instanceOffering512M512HZ");
         ImageInventory imageInventory = deployer.images.get("image1");
         ClusterInventory clusterInventory = deployer.clusters.get("cluster1");
@@ -99,7 +98,7 @@ public class TestDesignatedHostAllocationStrategy2 {
         creator.clusterUUid = clusterInventory.getUuid();
         VmInstanceInventory vm = creator.create();
         HostCapacityVO cvo = dbf.findByUuid(vm.getHostUuid(), HostCapacityVO.class);
-        Assert.assertEquals(instanceOffering.getCpuNum()*instanceOffering.getCpuSpeed(), cvo.getUsedCpu());
+        Assert.assertEquals(instanceOffering.getCpuNum(), cvo.getUsedCpu());
         Assert.assertEquals(instanceOffering.getMemorySize(), cvo.getUsedMemory());
         Assert.assertEquals(clusterInventory.getUuid(), vm.getClusterUuid());
     }

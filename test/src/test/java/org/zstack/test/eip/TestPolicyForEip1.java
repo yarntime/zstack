@@ -6,19 +6,10 @@ import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.header.identity.AccountConstant.StatementEffect;
-import org.zstack.header.identity.AccountInventory;
-import org.zstack.header.identity.IdentityErrors;
-import org.zstack.header.identity.PolicyInventory.Statement;
-import org.zstack.header.identity.SessionInventory;
-import org.zstack.header.network.l3.L3NetworkConstant;
+import org.zstack.header.identity.*;
 import org.zstack.header.network.l3.L3NetworkInventory;
-import org.zstack.header.query.QueryCondition;
-import org.zstack.header.vm.VmInstanceInventory;
-import org.zstack.header.vm.VmNicInventory;
-import org.zstack.network.service.eip.*;
-import org.zstack.network.service.vip.APICreateVipMsg;
-import org.zstack.network.service.vip.VipConstant;
+import org.zstack.network.service.eip.EipConstant;
+import org.zstack.network.service.eip.EipInventory;
 import org.zstack.network.service.vip.VipInventory;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.simulator.virtualrouter.VirtualRouterSimulatorConfig;
@@ -28,8 +19,10 @@ import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
 import org.zstack.test.identity.IdentityCreator;
+import org.zstack.utils.CollectionUtils;
+import org.zstack.utils.function.Function;
 
-import java.util.ArrayList;
+import java.util.List;
 
 /**
  * test quota
@@ -78,6 +71,19 @@ public class TestPolicyForEip1 {
         SessionInventory session = identityCreator.getAccountSession();
 
         createEip(l3.getUuid(), null, session);
+
+        List<Quota.QuotaUsage> usages = api.getQuotaUsage(null, session);
+        Quota.QuotaUsage u = CollectionUtils.find(usages, new Function<Quota.QuotaUsage, Quota.QuotaUsage>() {
+            @Override
+            public Quota.QuotaUsage call(Quota.QuotaUsage arg) {
+                return arg.getName().equals(EipConstant.QUOTA_EIP_NUM) ? arg : null;
+            }
+        });
+        Assert.assertNotNull(u);
+
+        QuotaInventory q = api.getQuota(EipConstant.QUOTA_EIP_NUM, test.getUuid(), session);
+        Assert.assertEquals(1, u.getUsed().intValue());
+        Assert.assertEquals(q.getValue(), u.getTotal().longValue());
 
         api.updateQuota(test.getUuid(), EipConstant.QUOTA_EIP_NUM, 1);
 

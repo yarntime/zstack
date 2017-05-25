@@ -1,51 +1,62 @@
 package org.zstack.header.storage.primary;
 
 import org.zstack.header.image.ImageConstant.ImageMediaType;
-import org.zstack.header.image.ImageEO;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
+import org.zstack.header.vo.ShadowEntity;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @Entity
 @Table
-public class ImageCacheVO {
+public class ImageCacheVO implements ShadowEntity {
     @Id
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column
     private long id;
-    
+
     @Column
     @ForeignKey(parentEntityClass = PrimaryStorageEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String primaryStorageUuid;
-    
+
     @Column
-    @ForeignKey(parentEntityClass = ImageEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String imageUuid;
-    
+
     @Column
     private String installUrl;
-    
+
     @Column
     @Enumerated(EnumType.STRING)
     private ImageMediaType mediaType;
-    
+
     @Column
     private long size;
-    
+
     @Column
     @Enumerated(EnumType.STRING)
     private ImageCacheState state = ImageCacheState.ready;
-    
+
     @Column
     private String md5sum;
-    
+
     @Column
     private Timestamp createDate;
-    
+
     @Column
     private Timestamp lastOpDate;
+
+    @Transient
+    private ImageCacheVO shadow;
+
+    public ImageCacheVO getShadow() {
+        return shadow;
+    }
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public long getId() {
         return id;
@@ -125,5 +136,10 @@ public class ImageCacheVO {
 
     public void setState(ImageCacheState state) {
         this.state = state;
+    }
+
+    @Override
+    public void setShadow(Object o) {
+        shadow = (ImageCacheVO) o;
     }
 }

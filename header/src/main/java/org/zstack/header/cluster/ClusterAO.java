@@ -3,6 +3,7 @@ package org.zstack.header.cluster;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 import org.zstack.header.zone.ZoneEO;
 
 import javax.persistence.*;
@@ -11,11 +12,7 @@ import java.sql.Timestamp;
 /**
  */
 @MappedSuperclass
-public class ClusterAO {
-    @Id
-    @Column
-    private String uuid;
-
+public class ClusterAO extends ResourceVO {
     @Column
     @ForeignKey(parentEntityClass = ZoneEO.class, onDeleteAction = ReferenceOption.RESTRICT)
     private String zoneUuid;
@@ -50,20 +47,17 @@ public class ClusterAO {
         this.state = ClusterState.Disabled;
     }
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
     public String getName() {
         return name;
     }
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getDescription() {

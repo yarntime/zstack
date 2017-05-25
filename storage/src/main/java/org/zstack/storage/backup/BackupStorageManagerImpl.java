@@ -15,22 +15,26 @@ import org.zstack.core.db.DbEntityLister;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.core.thread.AsyncThread;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.AbstractService;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.managementnode.ManagementNodeChangeListener;
+import org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.storage.backup.*;
-import org.zstack.query.QueryFacade;
 import org.zstack.search.GetQuery;
 import org.zstack.search.SearchQuery;
 import org.zstack.tag.TagManager;
+import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.ObjectUtils;
 import org.zstack.utils.SizeUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.function.ForEachFunction;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.LockModeType;
 import javax.persistence.Tuple;
@@ -38,7 +42,8 @@ import javax.persistence.TypedQuery;
 import java.util.*;
 import java.util.concurrent.Callable;
 
-public class BackupStorageManagerImpl extends AbstractService implements BackupStorageManager, ManagementNodeChangeListener {
+public class BackupStorageManagerImpl extends AbstractService implements BackupStorageManager,
+        ManagementNodeChangeListener, ManagementNodeReadyExtensionPoint {
     private static final CLogger logger = Utils.getLogger(BackupStorageManager.class);
 
     @Autowired
@@ -71,12 +76,12 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
             } else if (msg instanceof APIListBackupStorageMsg) {
                 handle((APIListBackupStorageMsg) msg);
             } else if (msg instanceof APISearchBackupStorageMsg) {
-            	handle((APISearchBackupStorageMsg) msg);
+                handle((APISearchBackupStorageMsg) msg);
             } else if (msg instanceof APIGetBackupStorageMsg) {
                 handle((APIGetBackupStorageMsg) msg);
             } else if (msg instanceof APIGetBackupStorageTypesMsg) {
                 handle((APIGetBackupStorageTypesMsg) msg);
-            } else if ( msg instanceof APIGetBackupStorageCapacityMsg) {
+            } else if (msg instanceof APIGetBackupStorageCapacityMsg) {
                 handle((APIGetBackupStorageCapacityMsg) msg);
             } else if (msg instanceof BackupStorageMessage) {
                 passThrough((BackupStorageMessage) msg);
@@ -136,14 +141,14 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
     }
 
     private void handle(APISearchBackupStorageMsg msg) {
-    	SearchQuery<BackupStorageInventory> sq = SearchQuery.create(msg, BackupStorageInventory.class);
-    	String content = sq.listAsString();
-    	APISearchBackupStorageReply reply = new APISearchBackupStorageReply();
-    	reply.setContent(content);
-    	bus.reply(msg, reply);
-	}
+        SearchQuery<BackupStorageInventory> sq = SearchQuery.create(msg, BackupStorageInventory.class);
+        String content = sq.listAsString();
+        APISearchBackupStorageReply reply = new APISearchBackupStorageReply();
+        reply.setContent(content);
+        bus.reply(msg, reply);
+    }
 
-	private void handle(APIListBackupStorageMsg msg) {
+    private void handle(APIListBackupStorageMsg msg) {
         List<BackupStorageVO> vos = dl.listByApiMessage(msg, BackupStorageVO.class);
         List<BackupStorageInventory> invs = BackupStorageInventory.valueOf(vos);
         APIListBackupStorageReply reply = new APIListBackupStorageReply();
@@ -180,6 +185,7 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
         } else {
             vo.setUuid(Platform.getUuid());
         }
+
         vo.setUrl(msg.getUrl());
         vo.setType(type.toString());
         vo.setName(msg.getName());
@@ -188,11 +194,19 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
         vo.setStatus(BackupStorageStatus.Connecting);
 
         final BackupStorageInventory inv = factory.createBackupStorage(vo, msg);
+        AddBackupStorageStruct addBackupStoragestruct = new AddBackupStorageStruct();
+        if(msg.isImportImages()) {
+            addBackupStoragestruct.setImportImages(true);
+        }
+        addBackupStoragestruct.setBackupStorageInventory(inv);
+        addBackupStoragestruct.setType(vo.getType());
 
         tagMgr.createTagsFromAPICreateMessage(msg, inv.getUuid(), BackupStorageVO.class.getSimpleName());
 
+
         final APIAddBackupStorageEvent evt = new APIAddBackupStorageEvent(msg.getId());
         ConnectBackupStorageMsg cmsg = new ConnectBackupStorageMsg();
+        cmsg.setNewAdd(true);
         cmsg.setBackupStorageUuid(inv.getUuid());
         bus.makeTargetServiceIdByResourceUuid(cmsg, BackupStorageConstant.SERVICE_ID, vo.getUuid());
         bus.send(cmsg, new CloudBusCallBack(msg) {
@@ -201,9 +215,17 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
                 if (reply.isSuccess()) {
                     evt.setInventory(factory.reload(inv.getUuid()));
                     bus.publish(evt);
+
+                    CollectionUtils.safeForEach(pluginRgty.getExtensionList(AddBackupStorageExtensionPoint.class), new ForEachFunction<AddBackupStorageExtensionPoint>() {
+                        @Override
+                        public void run(AddBackupStorageExtensionPoint ext) {
+                            ext.afterAddBackupStorage(addBackupStoragestruct);
+                        }
+                    });
+
                 } else {
                     dbf.removeByPrimaryKey(inv.getUuid(), BackupStorageVO.class);
-                    evt.setErrorCode(errf.instantiateErrorCode(SysErrors.CREATE_RESOURCE_ERROR, reply.getError()));
+                    evt.setError(errf.instantiateErrorCode(SysErrors.CREATE_RESOURCE_ERROR, reply.getError()));
                     bus.publish(evt);
                 }
             }
@@ -277,9 +299,7 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
             }
 
             if (target == null) {
-                reply.setError(errf.stringToOperationError(
-                        String.format("capacity reservation on all backup storage failed")
-                ));
+                reply.setError(operr("capacity reservation on all backup storage failed"));
             } else {
                 reply.setInventory(target);
             }
@@ -320,7 +340,7 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
 
     private void populateBackupStorageFactory() {
         for (BackupStorageFactory factory : pluginRgty.getExtensionList(BackupStorageFactory.class)) {
-            BackupStorageFactory old =  backupStorageFactories.get(factory.getBackupStorageType().toString());
+            BackupStorageFactory old = backupStorageFactories.get(factory.getBackupStorageType().toString());
             if (old != null) {
                 throw new CloudRuntimeException(String.format("duplicate BackupStorageFactory[%s, %s] for type[%s]",
                         factory.getClass().getName(), old.getClass().getName(), old.getBackupStorageType()));
@@ -405,39 +425,13 @@ public class BackupStorageManagerImpl extends AbstractService implements BackupS
     }
 
     @Override
-    @AsyncThread
     public void iJoin(String nodeId) {
-        logger.debug(String.format("management node[uuid:%s] joins, starts load backup storage...", nodeId));
+    }
+
+    @Override
+    @AsyncThread
+    public void managementNodeReady() {
+        logger.debug(String.format("management node[uuid:%s] joins, starts load backup storage...", Platform.getManagementServerId()));
         loadBackupStorage();
     }
-
-    /*
-    @Override
-    public APIMessage intercept(APIMessage msg, ApiMessageInterceptorChain chain) throws CloudApiMessageInterceptorException {
-        ErrorCode err = null;
-        if (msg instanceof APIAddBackupStorageMsg) {
-            SimpleQuery<BackupStorageVO> query = dbf.createQuery(BackupStorageVO.class);
-            query.select(BackupStorageVO_.uuid);
-            query.add(BackupStorageVO_.url, Op.EQ, ((APIAddBackupStorageMsg) msg).getUrl());
-            String uuid = query.findValue();
-            if (uuid != null) {
-                String details = String.mediaType("There is a Backup storage[uuid:%s] having the same url[%s]", uuid, ((APIAddBackupStorageMsg) msg).getUrl());
-                err = ErrorCodeFacade.generateErrorCode(BackupStorageErrorCodes.FAILS_TO_ADD_BACKUP_STORAGE.toString(), details);
-                throw new CloudApiMessageInterceptorException(err);
-            }
-        } else if (msg instanceof APIChangeBackupStorageStateMsg) {
-            try {
-                BackupStorageStateEvent.valueOf(((APIChangeBackupStorageStateMsg) msg).getStateEvent());
-            } catch (IllegalArgumentException e) {
-                err = ErrorCodeFacade.generateErrorCode(ErrorCodeFacade.BuiltinErrors.INVALID_ARGRUMENT.toString(), "Unknown BackupStorageStateEvent: "
-                        + ((APIChangeBackupStorageStateMsg) msg).getStateEvent());
-                logger.warn("", e);
-                throw new CloudApiMessageInterceptorException(err);
-            }
-        }
-
-        return chain.intercept(msg);
-    }
-
-    */
 }

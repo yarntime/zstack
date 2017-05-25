@@ -5,15 +5,16 @@ import org.zstack.core.db.DatabaseGlobalProperty;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
+import java.util.concurrent.TimeUnit;
 
 /**
  */
 public aspect DbDeadlockAspect {
     private static final CLogger logger = Utils.getLogger(DbDeadlockAspect.class);
 
-    declare error: withincode(@org.springframework.transaction.annotation.Transactional *.* *(*)) && withincode(@org.zstack.core.db.DeadlockAutoRestart * *.*(*)) : "@Transactional and @DeadlockAutoRestart can not be present on the same method. @DeadlockAutoRestart must be on parent method which calls method that has @Transactional";
+    declare error: withincode(@org.springframework.transaction.annotation.Transactional * *.*(..)) && withincode(@org.zstack.core.db.DeadlockAutoRestart * *.*(..)) : "@Transactional and @DeadlockAutoRestart can not be present on the same method. @DeadlockAutoRestart must be on parent method which calls method that has @Transactional";
 
-    Object around() : execution(@org.zstack.core.db.DeadlockAutoRestart * org.zstack.core.db.DatabaseFacade+.*(..)) {
+    Object around() : execution(@org.zstack.core.db.DeadlockAutoRestart * *.*(..)) {
         RuntimeException bad = null;
         int times = DatabaseGlobalProperty.retryTimes;
         do {
@@ -25,6 +26,12 @@ public aspect DbDeadlockAspect {
                 Throwable root = DebugUtils.getRootCause(re);
                 if (root instanceof MySQLTransactionRollbackException && root.getMessage().contains("Deadlock")) {
                     logger.warn("deadlock happened, retry");
+
+                    try {
+                        TimeUnit.SECONDS.sleep(1);
+                    } catch (InterruptedException e) {
+                        logger.warn(e.getMessage(), e);
+                    }
                 } else {
                     throw re;
                 }

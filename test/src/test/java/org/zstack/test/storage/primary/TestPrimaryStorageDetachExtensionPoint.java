@@ -10,11 +10,9 @@ import org.zstack.header.cluster.ClusterInventory;
 import org.zstack.header.simulator.storage.primary.SimulatorPrimaryStorageDetails;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.data.SizeUnit;
+
 public class TestPrimaryStorageDetachExtensionPoint {
     Api api;
     ComponentLoader loader;
@@ -24,7 +22,7 @@ public class TestPrimaryStorageDetachExtensionPoint {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml").addXml("PrimaryStorageManager.xml")
                 .addXml("ZoneManager.xml").addXml("ClusterManager.xml")
@@ -57,7 +55,7 @@ public class TestPrimaryStorageDetachExtensionPoint {
             api.detachPrimaryStorage(inv.getUuid(), cluster.getUuid());
         } catch (ApiSenderException e) {
         }
-        
+
         ext.setPreventDetach(false);
         ext.setExpectedClusterUuid(cluster.getUuid());
         ext.setExpectedPrimaryStorageUuid(inv.getUuid());

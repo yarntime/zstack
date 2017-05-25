@@ -2,7 +2,6 @@ package org.zstack.header.managementnode;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
-import java.util.Date;
 
 @Entity
 @Table
@@ -13,17 +12,17 @@ public class ManagementNodeVO {
 
     @Column
     private String hostName;
-    
+
     @Column
     private Timestamp joinDate;
-    
+
     @Column
     private Timestamp heartBeat;
-    
+
     @Column
     @Enumerated(EnumType.STRING)
     private ManagementNodeState state = ManagementNodeState.JOINING;
-    
+
     @Column
     private int port;
 

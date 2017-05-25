@@ -26,16 +26,16 @@ import java.util.List;
 
 /**
  * make every conditions ready
- *
+ * <p>
  * confirm starts right and host capacity allocated right
  */
 public class TestDefaultHostAllocationStrategy {
     Deployer deployer;
-    Api api; 
+    Api api;
     ComponentLoader loader;
     CloudBus bus;
     DatabaseFacade dbf;
-    
+
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
@@ -87,7 +87,7 @@ public class TestDefaultHostAllocationStrategy {
 
     @Test
     public void test() throws ApiSenderException {
-        L3NetworkInventory l3  = deployer.l3Networks.get("l3Network1");
+        L3NetworkInventory l3 = deployer.l3Networks.get("l3Network1");
         InstanceOfferingInventory instanceOffering = deployer.instanceOfferings.get("instanceOffering512M512HZ");
         ImageInventory imageInventory = deployer.images.get("image1");
 
@@ -97,7 +97,7 @@ public class TestDefaultHostAllocationStrategy {
         creator.instanceOfferingUuid = instanceOffering.getUuid();
         VmInstanceInventory vm = creator.create();
         HostCapacityVO cvo = dbf.findByUuid(vm.getHostUuid(), HostCapacityVO.class);
-        Assert.assertEquals(instanceOffering.getCpuNum()*instanceOffering.getCpuSpeed(), cvo.getUsedCpu());
+        Assert.assertEquals(instanceOffering.getCpuNum(), cvo.getUsedCpu());
         Assert.assertEquals(instanceOffering.getMemorySize(), cvo.getUsedMemory());
     }
 

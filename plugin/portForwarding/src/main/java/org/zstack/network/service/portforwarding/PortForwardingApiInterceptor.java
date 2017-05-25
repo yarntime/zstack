@@ -12,11 +12,15 @@ import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.apimediator.StopRoutingException;
 import org.zstack.header.message.APIMessage;
+import org.zstack.header.vm.VmInstanceVO;
 import org.zstack.header.vm.VmNicVO;
 import org.zstack.header.vm.VmNicVO_;
 import org.zstack.network.service.vip.VipVO;
 import org.zstack.network.service.vip.VipVO_;
 import org.zstack.utils.network.NetworkUtils;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.Tuple;
 import javax.persistence.TypedQuery;
@@ -58,16 +62,12 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
         PortForwardingRuleState state = t.get(0, PortForwardingRuleState.class);
 
         if (state != PortForwardingRuleState.Enabled) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("Port forwarding rule[uuid:%s] is not in state of Enabled, current state is %s", msg.getRuleUuid(), state)
-            ));
+            throw new ApiMessageInterceptionException(operr("Port forwarding rule[uuid:%s] is not in state of Enabled, current state is %s", msg.getRuleUuid(), state));
         }
 
         String vmNicUuid = t.get(1, String.class);
         if (vmNicUuid != null) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("Port forwarding rule[uuid:%s] has been attached to vm nic[uuid:%s] already", msg.getRuleUuid(), vmNicUuid)
-            ));
+            return ;
         }
     }
 
@@ -77,9 +77,7 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
         q.add(PortForwardingRuleVO_.uuid, Op.EQ, msg.getUuid());
         String vmNicUuid = q.findValue();
         if (vmNicUuid == null) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("port forwarding rule rule[uuid:%s] has not been attached to any vm nic, can't detach", msg.getUuid())
-            ));
+            throw new ApiMessageInterceptionException(operr("port forwarding rule rule[uuid:%s] has not been attached to any vm nic, can't detach", msg.getUuid()));
         }
     }
 
@@ -91,24 +89,20 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
 
         String vmNicUuid = t.get(0, String.class);
         if (vmNicUuid != null) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("port forwarding rule[uuid:%s] has been attached to vm nic[uuid:%s], can't attach again", msg.getRuleUuid(), vmNicUuid)
-            ));
+            throw new ApiMessageInterceptionException(operr("port forwarding rule[uuid:%s] has been attached to vm nic[uuid:%s], can't attach again", msg.getRuleUuid(), vmNicUuid));
         }
 
         PortForwardingRuleState state = t.get(1, PortForwardingRuleState.class);
         if (state != PortForwardingRuleState.Enabled) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("port forwarding rule[uuid:%s] is not in state of Enabled,  current state is %s. A rule can only be attached when its state is Enabled", msg.getRuleUuid(), state)
-            ));
+            throw new ApiMessageInterceptionException(operr("port forwarding rule[uuid:%s] is not in state of Enabled,  current state is %s. A rule can only be attached when its state is Enabled", msg.getRuleUuid(), state));
         }
 
-        String vipL3Uuid = new Callable<String>() {
+        VipVO vip = new Callable<VipVO>() {
             @Override
             @Transactional(readOnly = true)
-            public String call() {
-                String sql = "select vip.uuid from VipVO vip, PortForwardingRuleVO pf where vip.uuid = pf.vipUuid and pf.uuid = :pfUuid";
-                TypedQuery<String> q = dbf.getEntityManager().createQuery(sql, String.class);
+            public VipVO call() {
+                String sql = "select vip from VipVO vip, PortForwardingRuleVO pf where vip.uuid = pf.vipUuid and pf.uuid = :pfUuid";
+                TypedQuery<VipVO> q = dbf.getEntityManager().createQuery(sql, VipVO.class);
                 q.setParameter("pfUuid", msg.getRuleUuid());
                 return q.getSingleResult();
             }
@@ -118,12 +112,18 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
         vq.select(VmNicVO_.l3NetworkUuid);
         vq.add(VmNicVO_.uuid, Op.EQ, msg.getVmNicUuid());
         String guestL3Uuid = vq.findValue();
-        if (guestL3Uuid.equals(vipL3Uuid)) {
-            throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                    String.format("guest l3Network of vm nic[uuid:%s] and vip l3Network of port forwarding rule[uuid:%s] are the same network",
-                            msg.getVmNicUuid(), msg.getRuleUuid())
-            ));
+        if (guestL3Uuid.equals(vip.getL3NetworkUuid())) {
+            throw new ApiMessageInterceptionException(argerr("guest l3Network of vm nic[uuid:%s] and vip l3Network of port forwarding rule[uuid:%s] are the same network",
+                            msg.getVmNicUuid(), msg.getRuleUuid()));
         }
+
+        if (vip.getPeerL3NetworkUuid() != null && !vip.getPeerL3NetworkUuid().equals(guestL3Uuid)) {
+            throw new ApiMessageInterceptionException(argerr("the VIP[uuid:%s] is already bound the a guest L3 network[uuid:%s], but the VM nic[uuid:%s]" +
+                            " is on another guest L3 network[uuid:%s]", vip.getUuid(), vip.getPeerL3NetworkUuid(),
+                            msg.getVmNicUuid(), guestL3Uuid));
+        }
+
+        checkIfAnotherVip(vip.getUuid(), msg.getVmNicUuid());
     }
 
     private boolean rangeOverlap(int s1, int e1, int s2, int e2) {
@@ -154,18 +154,14 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
         if (!msg.getVipPortStart().equals(msg.getVipPortEnd())) {
             // it's a port range
             if (msg.getVipPortEnd() - msg.getVipPortStart() != msg.getPrivatePortEnd() - msg.getPrivatePortStart()) {
-                throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                        String.format("for range port forwarding, the port range size must match; vip range[%s, %s]'s size doesn't match range[%s, %s]'s size",
-                                msg.getVipPortStart(), msg.getVipPortEnd(), msg.getPrivatePortStart(), msg.getPrivatePortEnd())
-                ));
+                throw new ApiMessageInterceptionException(argerr("for range port forwarding, the port range size must match; vip range[%s, %s]'s size doesn't match range[%s, %s]'s size",
+                                msg.getVipPortStart(), msg.getVipPortEnd(), msg.getPrivatePortStart(), msg.getPrivatePortEnd()));
             }
         }
 
         if (msg.getAllowedCidr() != null) {
             if (!NetworkUtils.isCidr(msg.getAllowedCidr())) {
-                throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                        String.format("invalid CIDR[%s]", msg.getAllowedCidr())
-                ));
+                throw new ApiMessageInterceptionException(argerr("invalid CIDR[%s]", msg.getAllowedCidr()));
             }
         }
 
@@ -174,30 +170,60 @@ public class PortForwardingApiInterceptor implements ApiMessageInterceptor {
         List<PortForwardingRuleVO> vos = q.list();
         for (PortForwardingRuleVO vo : vos) {
             if (vo.getProtocolType().toString().equals(msg.getProtocolType())) {
-                if (rangeOverlap(vipStart, vipEnd, vo.getVipPortStart(), vo.getPrivatePortEnd())) {
-                    throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                            String.format("vip port range[vipStartPort:%s, vipEndPort:%s] overlaps with rule[uuid:%s, vipStartPort:%s, vipEndPort:%s]",
-                                    vipStart, vipEnd, vo.getUuid(), vo.getVipPortStart(), vo.getVipPortEnd())
-                    ));
+                if (rangeOverlap(vipStart, vipEnd, vo.getVipPortStart(), vo.getVipPortEnd())) {
+                    throw new ApiMessageInterceptionException(argerr("vip port range[vipStartPort:%s, vipEndPort:%s] overlaps with rule[uuid:%s, vipStartPort:%s, vipEndPort:%s]",
+                                    vipStart, vipEnd, vo.getUuid(), vo.getVipPortStart(), vo.getVipPortEnd()));
                 }
             }
         }
 
         if (msg.getVmNicUuid() != null) {
             SimpleQuery<VipVO> vq = dbf.createQuery(VipVO.class);
-            vq.select(VipVO_.l3NetworkUuid);
+            vq.select(VipVO_.l3NetworkUuid, VipVO_.peerL3NetworkUuid);
             vq.add(VipVO_.uuid, Op.EQ, msg.getVipUuid());
-            String vipL3Uuid = vq.findValue();
+            Tuple t = vq.findTuple();
+            String vipL3Uuid = t.get(0, String.class);
+            String peerL3Uuid = t.get(1, String.class);
 
             SimpleQuery<VmNicVO> nicq = dbf.createQuery(VmNicVO.class);
             nicq.select(VmNicVO_.l3NetworkUuid);
             nicq.add(VmNicVO_.uuid, Op.EQ, msg.getVmNicUuid());
             String nicL3Uuid = nicq.findValue();
             if (nicL3Uuid.equals(vipL3Uuid)) {
-                throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                        String.format("guest l3Network of vm nic[uuid:%s] and vip l3Network of vip[uuid: %s] are the same network", msg.getVmNicUuid(), msg.getVipUuid())
-                ));
+                throw new ApiMessageInterceptionException(argerr("guest l3Network of vm nic[uuid:%s] and vip l3Network of vip[uuid: %s] are the same network", msg.getVmNicUuid(), msg.getVipUuid()));
             }
+
+            if (peerL3Uuid != null && !peerL3Uuid.equals(nicL3Uuid)) {
+                throw new ApiMessageInterceptionException(argerr("the VIP[uuid:%s] is already bound the a guest L3 network[uuid:%s], but the VM nic[uuid:%s]" +
+                                " is on another guest L3 network[uuid:%s]", msg.getVipUuid(), peerL3Uuid, msg.getVmNicUuid(), nicL3Uuid));
+            }
+
+            checkIfAnotherVip(msg.getVipUuid(), msg.getVmNicUuid());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    private void checkIfAnotherVip(String vipUuid, String vmNicUuid) {
+        String sql = "select nic.uuid from VmNicVO nic where nic.vmInstanceUuid = (select n.vmInstanceUuid from VmNicVO n where" +
+                " n.uuid = :nicUuid)";
+        TypedQuery<String> q = dbf.getEntityManager().createQuery(sql, String.class);
+        q.setParameter("nicUuid", vmNicUuid);
+        List<String> nicUuids = q.getResultList();
+
+        sql = "select count(*) from VmNicVO nic, PortForwardingRuleVO pf where nic.uuid = pf.vmNicUuid and pf.vipUuid != :vipUuid and nic.uuid in (:nicUuids)";
+        TypedQuery<Long> lq = dbf.getEntityManager().createQuery(sql, Long.class);
+        lq.setParameter("vipUuid", vipUuid);
+        lq.setParameter("nicUuids", nicUuids);
+        long count = lq.getSingleResult();
+
+        if (count > 0) {
+            sql = "select vm from VmInstanceVO vm, VmNicVO nic where vm.uuid = nic.vmInstanceUuid and nic.uuid = :nicUuid";
+            TypedQuery<VmInstanceVO> vq = dbf.getEntityManager().createQuery(sql, VmInstanceVO.class);
+            vq.setParameter("nicUuid", vmNicUuid);
+            VmInstanceVO vm = vq.getSingleResult();
+
+            throw new ApiMessageInterceptionException(operr("the VM[name:%s uuid:%s] already has port forwarding rules that have different VIPs than the one[uuid:%s]",
+                            vm.getName(), vm.getUuid(), vipUuid));
         }
     }
 

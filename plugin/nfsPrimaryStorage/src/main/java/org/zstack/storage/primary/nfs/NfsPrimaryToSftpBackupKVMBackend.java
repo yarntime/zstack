@@ -6,21 +6,22 @@ import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.host.HostConstant;
 import org.zstack.header.host.HostInventory;
-import org.zstack.header.host.HypervisorType;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.storage.backup.BackupStorageConstant;
 import org.zstack.header.storage.backup.BackupStorageInventory;
-import org.zstack.header.storage.backup.BackupStorageType;
 import org.zstack.header.storage.primary.ImageCacheInventory;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
-import org.zstack.header.storage.primary.PrimaryStorageType;
 import org.zstack.header.volume.VolumeInventory;
 import org.zstack.identity.AccountManager;
-import org.zstack.kvm.*;
+import org.zstack.kvm.KVMConstant;
+import org.zstack.kvm.KVMHostAsyncHttpCallMsg;
+import org.zstack.kvm.KVMHostAsyncHttpCallReply;
 import org.zstack.storage.backup.BackupStoragePathMaker;
 import org.zstack.storage.backup.sftp.*;
 import org.zstack.storage.primary.nfs.NfsPrimaryStorageKVMBackendCommands.*;
@@ -28,7 +29,8 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
-import java.util.Arrays;
+import static org.zstack.core.Platform.operr;
+
 import java.util.List;
 
 import static org.zstack.utils.CollectionDSL.list;
@@ -48,24 +50,26 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
     private DatabaseFacade dbf;
     @Autowired
     private NfsPrimaryStorageManager nfsMgr;
+    @Autowired
+    private ApiTimeoutManager timeoutMgr;
 
     public static final String CREATE_VOLUME_FROM_TEMPLATE_PATH = "/nfsprimarystorage/sftp/createvolumefromtemplate";
     public static final String UPLOAD_TO_SFTP_PATH = "/nfsprimarystorage/uploadtosftpbackupstorage";
     public static final String DOWNLOAD_FROM_SFTP_PATH = "/nfsprimarystorage/downloadfromsftpbackupstorage";
 
     @Override
-    public PrimaryStorageType getSupportedPrimaryStorageType() {
-        return PrimaryStorageType.valueOf(NfsPrimaryStorageConstant.NFS_PRIMARY_STORAGE_TYPE);
+    public String getSupportedPrimaryStorageType() {
+        return NfsPrimaryStorageConstant.NFS_PRIMARY_STORAGE_TYPE;
     }
 
     @Override
-    public BackupStorageType getSupportedBackupStorageType() {
-        return BackupStorageType.valueOf(SftpBackupStorageConstant.SFTP_BACKUP_STORAGE_TYPE);
+    public String getSupportedBackupStorageType() {
+        return SftpBackupStorageConstant.SFTP_BACKUP_STORAGE_TYPE;
     }
 
     @Override
-    public List<HypervisorType> getSupportedHypervisorTypes() {
-        return list(HypervisorType.valueOf(KVMConstant.KVM_HYPERVISOR_TYPE));
+    public List<String> getSupportedHypervisorTypes() {
+        return list(KVMConstant.KVM_HYPERVISOR_TYPE);
     }
 
     @Override
@@ -87,7 +91,7 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
         msg.setCommand(cmd);
         msg.setPath(CREATE_VOLUME_FROM_TEMPLATE_PATH);
         msg.setHostUuid(host.getUuid());
-        msg.setCommandTimeout(NfsPrimaryStorageGlobalProperty.KVM_CreateRootVolumeFromTemplateCmd_TIMEOUT);
+        msg.setCommandTimeout(timeoutMgr.getTimeout(cmd.getClass(), "5m"));
         bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, host.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
             @Override
@@ -99,11 +103,9 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
 
                 CreateRootVolumeFromTemplateResponse rsp = ((KVMHostAsyncHttpCallReply)reply).toResponse(CreateRootVolumeFromTemplateResponse.class);
                 if (!rsp.isSuccess()) {
-                    String err = String.format("fails to create root volume[uuid:%s] from cached image[path:%s] because %s",
-                            volume.getUuid(), image.getImageUuid(),
-                            rsp.getError());
-                    logger.warn(err);
-                    completion.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("fails to create root volume[uuid:%s] from cached image[path:%s] because %s",
+                            volume.getUuid(), image.getImageUuid(), rsp.getError());
+                    completion.fail(err);
                     return;
                 }
 
@@ -131,7 +133,9 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
                 final GetSftpBackupStorageDownloadCredentialReply greply = reply.castReply();
                 DownloadBitsFromSftpBackupStorageCmd cmd = new DownloadBitsFromSftpBackupStorageCmd();
                 cmd.setHostname(greply.getHostname());
+                cmd.setUsername(greply.getUsername());
                 cmd.setSshKey(greply.getSshKey());
+                cmd.setSshPort(greply.getSshPort());
                 cmd.setPrimaryStorageInstallPath(primaryStorageInstallPath);
                 cmd.setBackupStorageInstallPath(backupStorageInstallPath);
                 cmd.setUuid(pinv.getUuid());
@@ -140,7 +144,7 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
                 msg.setCommand(cmd);
                 msg.setPath(DOWNLOAD_FROM_SFTP_PATH);
                 msg.setHostUuid(host.getUuid());
-                msg.setCommandTimeout(NfsPrimaryStorageGlobalProperty.KVM_DownloadBitsFromSftpBackupStorageCmd_TIMEOUT);
+                msg.setCommandTimeout(timeoutMgr.getTimeout(cmd.getClass(), "5m"));
                 bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, host.getUuid());
                 bus.send(msg, new CloudBusCallBack(completion) {
                     @Override
@@ -152,10 +156,8 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
 
                         DownloadBitsFromSftpBackupStorageResponse rsp = ((KVMHostAsyncHttpCallReply)reply).toResponse(DownloadBitsFromSftpBackupStorageResponse.class);
                         if (!rsp.isSuccess()) {
-                            completion.fail(errf.stringToOperationError(
-                                    String.format(String.format("failed to download[%s] from SftpBackupStorage[hostname:%s] to nfs primary storage[uuid:%s, path:%s], %s",
-                                            backupStorageInstallPath, greply.getHostname(), pinv.getUuid(), primaryStorageInstallPath, rsp.getError()))
-                            ));
+                            completion.fail(operr("failed to download[%s] from SftpBackupStorage[hostname:%s] to nfs primary storage[uuid:%s, path:%s], %s",
+                                            backupStorageInstallPath, greply.getHostname(), pinv.getUuid(), primaryStorageInstallPath, rsp.getError()));
                             return;
                         }
 
@@ -168,7 +170,7 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
     }
 
     @Override
-    public void uploadBits(final PrimaryStorageInventory pinv, BackupStorageInventory bsinv, final String backupStorageInstallPath, final String primaryStorageInstallPath, final Completion completion) {
+    public void uploadBits(final String imageUuid, final PrimaryStorageInventory pinv, BackupStorageInventory bsinv, final String backupStorageInstallPath, final String primaryStorageInstallPath, final ReturnValueCompletion<String> completion) {
         GetSftpBackupStorageDownloadCredentialMsg gmsg = new GetSftpBackupStorageDownloadCredentialMsg();
         gmsg.setBackupStorageUuid(bsinv.getUuid());
         bus.makeTargetServiceIdByResourceUuid(gmsg, BackupStorageConstant.SERVICE_ID, bsinv.getUuid());
@@ -181,14 +183,16 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
                 }
 
                 GetSftpBackupStorageDownloadCredentialReply r = reply.castReply();
-                upload(r.getHostname(), r.getSshKey());
+                upload(r.getHostname(), r.getSshKey(), r.getSshPort(), r.getUsername());
             }
 
-            private void upload(final String hostname, String sshKey) {
+            private void upload(final String hostname, String sshKey, int sshPort, String username) {
                 final HostInventory host = primaryStorageFactory.getConnectedHostForOperation(pinv);
                 UploadToSftpCmd cmd = new UploadToSftpCmd();
                 cmd.setBackupStorageHostName(hostname);
+                cmd.setBackupStorageUserName(username);
                 cmd.setBackupStorageSshKey(sshKey);
+                cmd.setBackupStorageSshPort(sshPort);
                 cmd.setPrimaryStorageInstallPath(primaryStorageInstallPath);
                 cmd.setBackupStorageInstallPath(backupStorageInstallPath);
                 cmd.setUuid(pinv.getUuid());
@@ -197,7 +201,7 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
                 msg.setCommand(cmd);
                 msg.setPath(UPLOAD_TO_SFTP_PATH);
                 msg.setHostUuid(host.getUuid());
-                msg.setCommandTimeout(NfsPrimaryStorageGlobalProperty.KVM_UploadToSftpCmd_TIMEOUT);
+                msg.setCommandTimeout(timeoutMgr.getTimeout(cmd.getClass(), "5m"));
                 bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, host.getUuid());
                 bus.send(msg, new CloudBusCallBack(completion) {
                     @Override
@@ -209,13 +213,12 @@ public class NfsPrimaryToSftpBackupKVMBackend implements NfsPrimaryToBackupStora
 
                         UploadToSftpResponse rsp = ((KVMHostAsyncHttpCallReply)reply).toResponse(UploadToSftpResponse.class);
                         if (!rsp.isSuccess()) {
-                            completion.fail(errf.stringToOperationError(
-                                    String.format(String.format("failed to upload bits from nfs primary storage[uuid:%s, path:%s] to SFTP backup storage[hostname:%s, path: %s], %s",
-                                            pinv.getUuid(), primaryStorageInstallPath, hostname,  backupStorageInstallPath, rsp.getError()))));
+                            completion.fail(operr("failed to upload bits from nfs primary storage[uuid:%s, path:%s] to SFTP backup storage[hostname:%s, path: %s], %s",
+                                    pinv.getUuid(), primaryStorageInstallPath, hostname,  backupStorageInstallPath, rsp.getError()));
                             return;
                         }
 
-                        completion.success();
+                        completion.success(backupStorageInstallPath);
                     }
                 });
             }

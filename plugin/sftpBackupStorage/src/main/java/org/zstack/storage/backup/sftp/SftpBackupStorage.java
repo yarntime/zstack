@@ -1,47 +1,58 @@
 package org.zstack.storage.backup.sftp;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.zstack.core.CoreGlobalProperty;
+import org.zstack.core.ansible.AnsibleFacade;
 import org.zstack.core.ansible.AnsibleGlobalProperty;
 import org.zstack.core.ansible.AnsibleRunner;
 import org.zstack.core.ansible.SshFileMd5Checker;
-import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.configuration.ConfigurationConstant;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
+import org.zstack.header.image.ImageBackupStorageRefInventory;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
 import org.zstack.header.rest.JsonAsyncRESTCallback;
 import org.zstack.header.rest.RESTFacade;
 import org.zstack.header.storage.backup.*;
+import org.zstack.header.storage.backup.BackupStorageErrors.Opaque;
 import org.zstack.storage.backup.BackupStorageBase;
 import org.zstack.storage.backup.BackupStoragePathMaker;
 import org.zstack.storage.backup.sftp.SftpBackupStorageCommands.*;
+import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
+import static org.zstack.core.Platform.operr;
+
+import javax.persistence.Query;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 public class SftpBackupStorage extends BackupStorageBase {
     private static final CLogger logger = Utils.getLogger(SftpBackupStorage.class);
 
     @Autowired
-    private RESTFacade restf;
+    protected RESTFacade restf;
     @Autowired
-    private GlobalConfigFacade gcf;
+    private AnsibleFacade asf;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager timeoutManager;
+    @Autowired
+    private SftpBackupStorageMetaDataMaker metaDataMaker;
 
     private String agentPackageName = SftpBackupStorageGlobalProperty.AGENT_PACKAGE_NAME;
 
@@ -49,7 +60,8 @@ public class SftpBackupStorage extends BackupStorageBase {
         super(vo);
     }
 
-    private String buildUrl(String subPath) {
+
+    public String buildUrl(String subPath) {
         UriComponentsBuilder ub = UriComponentsBuilder.newInstance();
         ub.scheme(SftpBackupStorageGlobalProperty.AGENT_URL_SCHEME);
         if (CoreGlobalProperty.UNIT_TEST_ON) {
@@ -77,25 +89,26 @@ public class SftpBackupStorage extends BackupStorageBase {
     private class DownloadResult {
         String md5sum;
         long size;
+        long actualSize;
     }
 
-    private void download(String url, String installPath, final ReturnValueCompletion<DownloadResult> completion) {
+    private void download(String url, String installPath, String uuid, final ReturnValueCompletion<DownloadResult> completion) {
         try {
             URI uri = new URI(url);
             String scheme = uri.getScheme();
             if (!SftpBackupStorageFactory.type.getSupportedSchemes().contains(scheme)) {
-                throw new OperationFailureException(errf.stringToOperationError(
-                        String.format("SftpBackupStorage doesn't support scheme[%s] in url[%s]", scheme, url)
-                ));
+                throw new OperationFailureException(operr("SftpBackupStorage doesn't support scheme[%s] in url[%s]", scheme, url));
             }
 
             DownloadCmd cmd = new DownloadCmd();
+            cmd.setUuid(self.getUuid());
+            cmd.setImageUuid(uuid);
             cmd.setUrl(url);
             cmd.setUrlScheme(scheme);
             cmd.setInstallPath(installPath);
-            cmd.setTimeout(SftpBackupStorageGlobalProperty.DOWNLOAD_CMD_TIMEOUT);
+            cmd.setTimeout(timeoutManager.getTimeout(cmd.getClass(), "3h"));
 
-            restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.DOWNLOAD_IMAGE_PATH), cmd, new JsonAsyncRESTCallback<DownloadResponse>() {
+            restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.DOWNLOAD_IMAGE_PATH), cmd, new JsonAsyncRESTCallback<DownloadResponse>(completion) {
                 @Override
                 public void fail(ErrorCode err) {
                     completion.fail(err);
@@ -107,12 +120,13 @@ public class SftpBackupStorage extends BackupStorageBase {
                         DownloadResult res = new DownloadResult();
                         res.md5sum = ret.getMd5Sum();
                         res.size = ret.getSize();
+                        res.actualSize = ret.getActualSize();
 
                         updateCapacity(ret.getTotalCapacity(), ret.getAvailableCapacity());
 
                         completion.success(res);
                     } else {
-                        completion.fail(errf.stringToOperationError(ret.getError()));
+                        completion.fail(operr(ret.getError()));
                     }
                 }
 
@@ -120,22 +134,68 @@ public class SftpBackupStorage extends BackupStorageBase {
                 public Class<DownloadResponse> getReturnClass() {
                     return DownloadResponse.class;
                 }
-            }, TimeUnit.SECONDS, SftpBackupStorageGlobalProperty.DOWNLOAD_CMD_TIMEOUT);
+            });
         } catch (URISyntaxException e) {
             throw new CloudRuntimeException(e);
         }
     }
 
     @Override
+    protected void handle(final GetImageSizeOnBackupStorageMsg msg) {
+        final GetImageSizeOnBackupStorageReply reply = new GetImageSizeOnBackupStorageReply();
+
+        GetImageSizeCmd cmd = new GetImageSizeCmd();
+        cmd.uuid = self.getUuid();
+        cmd.imageUuid = msg.getImageUuid();
+        cmd.installPath = msg.getImageUrl();
+
+        restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.GET_IMAGE_SIZE), cmd,
+                new JsonAsyncRESTCallback<GetImageSizeRsp>(msg) {
+                    @Override
+                    public void fail(ErrorCode err) {
+                        reply.setError(err);
+                        bus.reply(msg, reply);
+                    }
+
+                    @Override
+                    public void success(GetImageSizeRsp rsp) {
+                        if (!rsp.isSuccess()) {
+                            reply.setError(operr(rsp.getError()));
+                        } else {
+                            reply.setSize(rsp.size);
+                        }
+
+                        bus.reply(msg, reply);
+                    }
+
+                    @Override
+                    public Class<GetImageSizeRsp> getReturnClass() {
+                        return GetImageSizeRsp.class;
+                    }
+                });
+    }
+
+    @Override
+    @Transactional
     protected void handle(final DownloadImageMsg msg) {
         final DownloadImageReply reply = new DownloadImageReply();
         final ImageInventory iinv = msg.getImageInventory();
         final String installPath = PathUtil.join(getSelf().getUrl(), BackupStoragePathMaker.makeImageInstallPath(iinv));
-        download(iinv.getUrl(), installPath, new ReturnValueCompletion<DownloadResult>(msg) {
+
+        String sql = "update ImageBackupStorageRefVO set installPath = :installPath " +
+                "where backupStorageUuid = :bsUuid and imageUuid = :imageUuid";
+        Query q = dbf.getEntityManager().createQuery(sql);
+        q.setParameter("installPath", installPath);
+        q.setParameter("bsUuid", msg.getBackupStorageUuid());
+        q.setParameter("imageUuid", msg.getImageInventory().getUuid());
+        q.executeUpdate();
+
+        download(iinv.getUrl(), installPath, iinv.getUuid(), new ReturnValueCompletion<DownloadResult>(msg) {
             @Override
             public void success(DownloadResult res) {
                 reply.setInstallPath(installPath);
                 reply.setSize(res.size);
+                reply.setActualSize(res.actualSize);
                 reply.setMd5sum(res.md5sum);
                 bus.reply(msg, reply);
             }
@@ -152,7 +212,7 @@ public class SftpBackupStorage extends BackupStorageBase {
     protected void handle(final DownloadVolumeMsg msg) {
         final DownloadVolumeReply reply = new DownloadVolumeReply();
         final String installPath = PathUtil.join(getSelf().getUrl(), BackupStoragePathMaker.makeVolumeInstallPath(msg.getUrl(), msg.getVolume()));
-        download(msg.getUrl(), installPath, new ReturnValueCompletion<DownloadResult>() {
+        download(msg.getUrl(), installPath, msg.getVolume().getUuid(), new ReturnValueCompletion<DownloadResult>(msg) {
             @Override
             public void success(DownloadResult res) {
                 reply.setInstallPath(installPath);
@@ -170,8 +230,63 @@ public class SftpBackupStorage extends BackupStorageBase {
     }
 
     @Override
-    protected void connectHook(Completion completion) {
-        connect(completion);
+    protected void connectHook(boolean newAdded, Completion completion) {
+        connect(new Completion(completion) {
+            @Override
+            public void success() {
+               if (!newAdded) {
+                   String backupStorageUrl = getSelf().getUrl();
+                   String backStorageHostName = getSelf().getHostname();
+                   String backupStorageUuid = getSelf().getUuid();
+                   SftpBackupStorageDumpMetadataInfo dumpInfo = new SftpBackupStorageDumpMetadataInfo();
+                   dumpInfo.setDumpAllInfo(true);
+                   dumpInfo.setBackupStorageUuid(backupStorageUuid);
+                   dumpInfo.setBackupStorageUrl(backupStorageUrl);
+                   dumpInfo.setBackupStorageHostname(backStorageHostName);
+
+                   metaDataMaker.dumpImagesBackupStorageInfoToMetaDataFile(dumpInfo);
+               }
+               completion.success();
+            }
+
+            @Override
+            public void fail(ErrorCode errorCode) {
+                completion.fail(errorCode);
+
+            }
+        });
+    }
+
+    @Override
+    protected void pingHook(final Completion completion) {
+        final PingCmd cmd = new PingCmd();
+        cmd.uuid = self.getUuid();
+        restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.PING_PATH), cmd, new JsonAsyncRESTCallback<PingResponse>(completion) {
+            @Override
+            public void fail(ErrorCode err) {
+                completion.fail(err);
+            }
+
+            @Override
+            public void success(PingResponse ret) {
+                if (ret.isSuccess() && !self.getUuid().equals(ret.getUuid())) {
+                    ErrorCode err = operr("the uuid of sftpBackupStorage agent changed[expected:%s, actual:%s], it's most likely" +
+                            " the agent was manually restarted. Issue a reconnect to sync the status", self.getUuid(), ret.getUuid());
+
+                    err.putToOpaque(Opaque.RECONNECT_AGENT.toString(), true);
+                    completion.fail(err);
+                } else if (ret.isSuccess()) {
+                    completion.success();
+                } else {
+                    completion.fail(operr(ret.getError()));
+                }
+            }
+
+            @Override
+            public Class<PingResponse> getReturnClass() {
+                return PingResponse.class;
+            }
+        });
     }
 
     private void continueConnect(final Completion complete) {
@@ -180,12 +295,12 @@ public class SftpBackupStorage extends BackupStorageBase {
             public void success() {
                 String url = buildUrl(SftpBackupStorageConstant.CONNECT_PATH);
                 ConnectCmd cmd = new ConnectCmd();
+                cmd.setUuid(self.getUuid());
                 cmd.setStoragePath(getSelf().getUrl());
                 ConnectResponse rsp = restf.syncJsonPost(url, cmd, ConnectResponse.class);
                 if (!rsp.isSuccess()) {
-                    String err = String.format("unable to connect to SimpleHttpBackupStorage[url:%s], because %s", url, rsp.getError());
-                    logger.warn(err);
-                    complete.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("unable to connect to SimpleHttpBackupStorage[url:%s], because %s", url, rsp.getError());
+                    complete.fail(err);
                     return;
                 }
 
@@ -201,7 +316,7 @@ public class SftpBackupStorage extends BackupStorageBase {
             }
         });
     }
-    
+
     private void connect(final Completion complete) {
         if (CoreGlobalProperty.UNIT_TEST_ON) {
             continueConnect(complete);
@@ -212,15 +327,17 @@ public class SftpBackupStorage extends BackupStorageBase {
         checker.setTargetIp(getSelf().getHostname());
         checker.setUsername(getSelf().getUsername());
         checker.setPassword(getSelf().getPassword());
-        checker.addSrcDestPair(SshFileMd5Checker.ZSTACKLIB_SRC_PATH, String.format("/var/lib/zstack/sftpbackupstorage/%s", AnsibleGlobalProperty.ZSTACKLIB_PACKAGE_NAME));
+        checker.setSshPort(getSelf().getSshPort());
+        checker.addSrcDestPair(SshFileMd5Checker.ZSTACKLIB_SRC_PATH, String.format("/var/lib/zstack/sftpbackupstorage/package/%s", AnsibleGlobalProperty.ZSTACKLIB_PACKAGE_NAME));
         checker.addSrcDestPair(PathUtil.findFileOnClassPath(String.format("ansible/sftpbackupstorage/%s", agentPackageName), true).getAbsolutePath(),
-                String.format("/var/lib/zstack/sftpbackupstorage/%s", agentPackageName));
+                String.format("/var/lib/zstack/sftpbackupstorage/package/%s", agentPackageName));
 
         AnsibleRunner runner = new AnsibleRunner();
         runner.installChecker(checker);
         runner.setPassword(getSelf().getPassword());
         runner.setUsername(getSelf().getUsername());
         runner.setTargetIp(getSelf().getHostname());
+        runner.setSshPort(getSelf().getSshPort());
         runner.setAgentPort(SftpBackupStorageGlobalProperty.AGENT_PORT);
         runner.setPlayBookName(SftpBackupStorageConstant.ANSIBLE_PLAYBOOK_NAME);
         runner.putArgument("pkg_sftpbackupstorage", agentPackageName);
@@ -265,6 +382,7 @@ public class SftpBackupStorage extends BackupStorageBase {
         final DeleteBitsOnBackupStorageReply reply = new DeleteBitsOnBackupStorageReply();
 
         DeleteCmd cmd = new DeleteCmd();
+        cmd.uuid = self.getUuid();
         cmd.setInstallUrl(msg.getInstallPath());
         restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.DELETE_PATH), cmd, new JsonAsyncRESTCallback<DeleteResponse>(msg) {
             @Override
@@ -278,7 +396,7 @@ public class SftpBackupStorage extends BackupStorageBase {
                 if (!ret.isSuccess()) {
                     logger.warn(String.format("failed to delete bits[%s], schedule clean up, %s",
                             msg.getInstallPath(), ret.getError()));
-                    //TODO: schedule cleanup
+                    //TODO GC
                 } else {
                     updateCapacity(ret.getTotalCapacity(), ret.getAvailableCapacity());
                 }
@@ -292,29 +410,6 @@ public class SftpBackupStorage extends BackupStorageBase {
         });
     }
 
-    protected void handle(final PingBackupStorageMsg msg) {
-        final PingBackupStorageReply reply = new PingBackupStorageReply();
-        PingCmd cmd = new PingCmd();
-        restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.PING_PATH), cmd, new JsonAsyncRESTCallback<PingResponse>() {
-            @Override
-            public void fail(ErrorCode err) {
-                reply.setAvailable(false);
-                bus.reply(msg, reply);
-            }
-
-            @Override
-            public void success(PingResponse ret) {
-                reply.setAvailable(ret.isSuccess());
-                bus.reply(msg, reply);
-            }
-
-            @Override
-            public Class<PingResponse> getReturnClass() {
-                return PingResponse.class;
-            }
-        });
-    }
-
     @Override
     protected void handle(BackupStorageAskInstallPathMsg msg) {
         BackupStorageAskInstallPathReply reply = new BackupStorageAskInstallPathReply();
@@ -323,12 +418,62 @@ public class SftpBackupStorage extends BackupStorageBase {
         bus.reply(msg, reply);
     }
 
+    @Override
+    protected void handle(final SyncImageSizeOnBackupStorageMsg msg) {
+        final SyncImageSizeOnBackupStorageReply reply = new SyncImageSizeOnBackupStorageReply();
+
+        ImageInventory image = msg.getImage();
+        GetImageSizeCmd cmd = new GetImageSizeCmd();
+        cmd.imageUuid = image.getUuid();
+        cmd.uuid = self.getUuid();
+
+        ImageBackupStorageRefInventory ref = CollectionUtils.find(image.getBackupStorageRefs(), new Function<ImageBackupStorageRefInventory, ImageBackupStorageRefInventory>() {
+            @Override
+            public ImageBackupStorageRefInventory call(ImageBackupStorageRefInventory arg) {
+                return arg.getBackupStorageUuid().equals(self.getUuid()) ? arg : null;
+            }
+        });
+
+        if (ref == null) {
+            throw new CloudRuntimeException(String.format("cannot find ImageBackupStorageRefInventory of image[uuid:%s] for the backup storage[uuid:%s]",
+                    image.getUuid(), self.getUuid()));
+        }
+
+        cmd.installPath = ref.getInstallPath();
+        restf.asyncJsonPost(buildUrl(SftpBackupStorageConstant.GET_IMAGE_SIZE), cmd, new JsonAsyncRESTCallback<GetImageSizeRsp>(msg) {
+            @Override
+            public void fail(ErrorCode err) {
+                reply.setError(err);
+                bus.reply(msg, reply);
+            }
+
+            @Override
+            public void success(GetImageSizeRsp rsp) {
+                if (!rsp.isSuccess()) {
+                    reply.setError(operr(rsp.getError()));
+                } else {
+                    reply.setActualSize(rsp.actualSize);
+                    reply.setSize(rsp.size);
+                }
+
+                bus.reply(msg, reply);
+            }
+
+            @Override
+            public Class<GetImageSizeRsp> getReturnClass() {
+                return GetImageSizeRsp.class;
+            }
+        });
+    }
+
     private void handle(final GetSftpBackupStorageDownloadCredentialMsg msg) {
         final GetSftpBackupStorageDownloadCredentialReply reply = new GetSftpBackupStorageDownloadCredentialReply();
 
-        String key = gcf.getConfigValue(ConfigurationConstant.GlobalConfig.privateKey.getCategory(), ConfigurationConstant.GlobalConfig.privateKey.toString(), String.class);
+        String key = asf.getPrivateKey();
         reply.setHostname(getSelf().getHostname());
+        reply.setUsername(getSelf().getUsername());
         reply.setSshKey(key);
+        reply.setSshPort(getSelf().getSshPort());
         bus.reply(msg, reply);
     }
 
@@ -349,7 +494,7 @@ public class SftpBackupStorage extends BackupStorageBase {
 
             @Override
             public void fail(ErrorCode errorCode) {
-                evt.setErrorCode(errf.instantiateErrorCode(SftpBackupStorageErrors.RECONNECT_ERROR, errorCode));
+                evt.setError(errf.instantiateErrorCode(SftpBackupStorageErrors.RECONNECT_ERROR, errorCode));
                 bus.publish(evt);
             }
         });
@@ -357,6 +502,10 @@ public class SftpBackupStorage extends BackupStorageBase {
 
     @Override
     protected BackupStorageVO updateBackupStorage(APIUpdateBackupStorageMsg msg) {
+        if (!(msg instanceof APIUpdateSftpBackupStorageMsg)) {
+            return super.updateBackupStorage(msg);
+        }
+
         SftpBackupStorageVO vo = (SftpBackupStorageVO) super.updateBackupStorage(msg);
         vo = vo == null ? getSelf() : vo;
 
@@ -367,7 +516,16 @@ public class SftpBackupStorage extends BackupStorageBase {
         if (umsg.getPassword() != null) {
             vo.setPassword(umsg.getPassword());
         }
+        if (umsg.getHostname() != null) {
+            vo.setHostname(umsg.getHostname());
+        }
+        if (umsg.getSshPort() != null && umsg.getSshPort() > 0 && umsg.getSshPort() <= 65535) {
+            vo.setSshPort(umsg.getSshPort());
+        }
 
         return vo;
     }
+
+
+
 }

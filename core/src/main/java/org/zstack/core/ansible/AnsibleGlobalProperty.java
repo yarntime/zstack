@@ -7,12 +7,14 @@ import org.zstack.core.GlobalPropertyDefinition;
  */
 @GlobalPropertyDefinition
 public class AnsibleGlobalProperty {
-    @GlobalProperty(name = "Ansible.executable", defaultValue = "ansible-playbook")
+    @GlobalProperty(name = "Ansible.executable", defaultValue = "python")
     public static String EXECUTABLE;
-    @GlobalProperty(name = "Ansible.zstacklibPackageName", defaultValue = "zstacklib-0.9.tar.gz")
+    @GlobalProperty(name = "Ansible.zstacklibPackageName", defaultValue = "zstacklib-2.0.0.tar.gz")
     public static String ZSTACKLIB_PACKAGE_NAME;
-    @GlobalProperty(name = "Ansible.zstackRoot", defaultValue = "/var/lib/zstack/")
+    @GlobalProperty(name = "Ansible.zstackRoot", defaultValue = "/var/lib/zstack")
     public static String ZSTACK_ROOT;
+    @GlobalProperty(name = "Ansible.var.zstack_repo", defaultValue = "false")
+    public static String ZSTACK_REPO;
     @GlobalProperty(name = "Ansible.fullDeploy", defaultValue = "false")
     public static boolean FULL_DEPLOY;
     @GlobalProperty(name = "Ansible.keepHostsFileInMemory", defaultValue = "true")

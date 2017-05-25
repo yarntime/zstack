@@ -20,3 +20,14 @@ test/unitTestSuiteReport/*
 .setting
 *.log
 premium/
+*.orig
+*.rej
+.classpath
+.project
+.settings
+zstack-api.log
+.vscode/
+test-premium/zstack-integration-test-result/
+envDSLTree
+test/zstack-integration-test-result/
+premium/test-premium/zstack-api.log

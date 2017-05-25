@@ -1,10 +1,10 @@
 package org.zstack.network.service.portforwarding;
 
-import org.zstack.header.tag.AutoDeleteTag;
 import org.zstack.header.vm.VmNicVO;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 import org.zstack.network.service.vip.VipVO;
 
 import javax.persistence.*;
@@ -12,12 +12,7 @@ import java.sql.Timestamp;
 
 @Entity
 @Table
-@AutoDeleteTag
-public class PortForwardingRuleVO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class PortForwardingRuleVO extends ResourceVO {
     @Column
     @Index
     private String name;
@@ -72,6 +67,11 @@ public class PortForwardingRuleVO {
     @Column
     private Timestamp lastOpDate;
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
     public String getVipIp() {
         return vipIp;
     }
@@ -94,14 +94,6 @@ public class PortForwardingRuleVO {
 
     public void setState(PortForwardingRuleState state) {
         this.state = state;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getName() {

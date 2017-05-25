@@ -3,11 +3,13 @@ package org.zstack.test.storage.primary.nfs;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.zstack.compute.vm.VmGlobalConfig;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
+import org.zstack.header.vm.VmInstanceDeletionPolicyManager.VmInstanceDeletionPolicy;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.test.Api;
@@ -18,8 +20,6 @@ import org.zstack.test.deployer.Deployer;
 import org.zstack.test.storage.backup.sftp.TestSftpBackupStorageDeleteImage2;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
-
-import java.util.concurrent.TimeUnit;
 
 public class TestExpungeVolumeOnNfsPrimaryStorageForKvm {
     CLogger logger = Utils.getLogger(TestSftpBackupStorageDeleteImage2.class);
@@ -47,11 +47,12 @@ public class TestExpungeVolumeOnNfsPrimaryStorageForKvm {
         gcf = loader.getComponent(GlobalConfigFacade.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
-	    VmInstanceInventory vm = deployer.vms.get("TestVm");
-	    api.destroyVmInstance(vm.getUuid());
+
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
+        VmGlobalConfig.VM_DELETION_POLICY.updateValue(VmInstanceDeletionPolicy.Direct.toString());
+        VmInstanceInventory vm = deployer.vms.get("TestVm");
+        api.destroyVmInstance(vm.getUuid());
         Assert.assertFalse(config.deleteCmds.isEmpty());
-	}
+    }
 }

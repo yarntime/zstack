@@ -6,6 +6,7 @@ import org.zstack.appliancevm.ApplianceVmCommands.RefreshFirewallCmd;
 import org.zstack.appliancevm.ApplianceVmCommands.RefreshFirewallRsp;
 import org.zstack.compute.vm.VmInstanceBase;
 import org.zstack.core.CoreGlobalProperty;
+import org.zstack.core.MessageCommandRecorder;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.header.core.Completion;
@@ -26,14 +27,20 @@ import org.zstack.header.network.l3.L3NetworkVO_;
 import org.zstack.header.rest.JsonAsyncRESTCallback;
 import org.zstack.header.rest.RESTFacade;
 import org.zstack.header.vm.*;
+import org.zstack.header.vm.VmInstanceConstant.VmOperation;
+import org.zstack.header.vm.VmInstanceDeletionPolicyManager.VmInstanceDeletionPolicy;
 import org.zstack.header.volume.VolumeFormat;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.RangeSet;
 import org.zstack.utils.RangeSet.Range;
 import org.zstack.utils.function.Function;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+
+import static org.zstack.utils.CollectionDSL.list;
 
 public abstract class ApplianceVmBase extends VmInstanceBase implements ApplianceVm {
     @Autowired
@@ -48,7 +55,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
     }
 
     @Autowired
-    private ApplianceVmFacade apvmf;
+    protected ApplianceVmFacade apvmf;
 
     protected abstract List<Flow> getPostCreateFlows();
     protected abstract List<Flow> getPostStartFlows();
@@ -69,7 +76,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
         return ApplianceVmInventory.valueOf(getSelf());
     }
 
-    private List<Flow> createBootstrapFlows(HypervisorType hvType) {
+    protected List<Flow> createBootstrapFlows(HypervisorType hvType) {
         Boolean unitTestOn = CoreGlobalProperty.UNIT_TEST_ON;
         List<Flow> flows = new ArrayList<Flow>();
 
@@ -84,6 +91,12 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
     }
 
     @Override
+    protected void destroyHook(VmInstanceDeletionPolicy deletionPolicy, final Completion completion){
+        logger.debug(String.format("deleting appliance vm[uuid:%s], always use Direct deletion policy", self.getUuid()));
+        super.doDestroy(VmInstanceDeletionPolicy.Direct, completion);
+    }
+
+    @Override
     protected void handleLocalMessage(Message msg) {
         if (msg instanceof ApplianceVmRefreshFirewallMsg) {
             handle((ApplianceVmRefreshFirewallMsg) msg);
@@ -94,7 +107,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
         }
     }
 
-    private void handle(final ApplianceVmAsyncHttpCallMsg msg) {
+    protected void handle(final ApplianceVmAsyncHttpCallMsg msg) {
         thdf.chainSubmit(new ChainTask(msg) {
             @Override
             public int getSyncLevel() {
@@ -110,12 +123,14 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             public void run(final SyncTaskChain chain) {
                 final ApplianceVmAsyncHttpCallReply reply = new ApplianceVmAsyncHttpCallReply();
                 if (msg.isCheckStatus() && getSelf().getStatus() != ApplianceVmStatus.Connected) {
-                    reply.setError(errf.stringToOperationError(String.format("appliance vm[uuid:%s] is in status of %s that cannot make http call to %s",
-                            self.getUuid(), getSelf().getStatus(), msg.getPath())));
+                    reply.setError(operr("appliance vm[uuid:%s] is in status of %s that cannot make http call to %s",
+                            self.getUuid(), getSelf().getStatus(), msg.getPath()));
                     bus.reply(msg, reply);
                     chain.next();
                     return;
                 }
+
+                MessageCommandRecorder.record(msg.getCommandClassName());
 
                 restf.asyncJsonPost(buildUrl(msg.getPath()), msg.getCommand(), new JsonAsyncRESTCallback<LinkedHashMap>(msg, chain) {
                     @Override
@@ -146,7 +161,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
         });
     }
 
-    private void handle(final ApplianceVmRefreshFirewallMsg msg) {
+    protected void handle(final ApplianceVmRefreshFirewallMsg msg) {
         if (msg.isInSyncThread()) {
             thdf.chainSubmit(new ChainTask(msg) {
                 @Override
@@ -170,7 +185,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                 }
             });
         } else {
-            refreshFirewall(msg, new NoErrorCompletion() {
+            refreshFirewall(msg, new NoErrorCompletion(msg) {
                 @Override
                 public void done() {
                     // nothing
@@ -179,7 +194,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
         }
     }
 
-    public static String buildAgentUrl(String hostname, String subPath) {
+    public static String buildAgentUrl(String hostname, String subPath, int port) {
         UriComponentsBuilder ub = UriComponentsBuilder.newInstance();
         ub.scheme(ApplianceVmGlobalProperty.AGENT_URL_SCHEME);
         if (CoreGlobalProperty.UNIT_TEST_ON) {
@@ -187,7 +202,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
         } else {
             ub.host(hostname);
         }
-        ub.port(ApplianceVmGlobalProperty.AGENT_PORT);
+        ub.port(port);
         if (!"".equals(ApplianceVmGlobalProperty.AGENT_URL_ROOT_PATH)) {
             ub.path(ApplianceVmGlobalProperty.AGENT_URL_ROOT_PATH);
         }
@@ -206,7 +221,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             }
         });
 
-        return buildAgentUrl(mgmtNicIp, path);
+        return buildAgentUrl(mgmtNicIp, path, getSelf().getAgentPort());
     }
 
     private void refreshFirewall(final ApplianceVmRefreshFirewallMsg msg, final NoErrorCompletion completion) {
@@ -336,7 +351,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                 if (!ret.isSuccess()) {
                     logger.warn(String.format("failed to refresh firewall rules on appliance vm[uuid:%s, name:%s], %s",
                             self.getUuid(), self.getName(), ret.getError()));
-                    reply.setError(errf.stringToOperationError(ret.getError()));
+                    reply.setError(operr(ret.getError()));
                 }
 
                 bus.reply(msg, reply);
@@ -357,8 +372,8 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
     }
 
     @Override
-    protected VmInstanceSpec buildSpecFromInventory(VmInstanceInventory inv) {
-        VmInstanceSpec spec = super.buildSpecFromInventory(inv);
+    protected VmInstanceSpec buildSpecFromInventory(VmInstanceInventory inv, VmOperation operation) {
+        VmInstanceSpec spec = super.buildSpecFromInventory(inv, operation);
         spec.putExtensionData(ApplianceVmConstant.Params.applianceVmSubType.toString(), getSelf().getApplianceVmType());
         return spec;
     }
@@ -396,7 +411,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             }
 
             @Override
-            public void rollback(FlowTrigger trigger, Map data) {
+            public void rollback(FlowRollback trigger, Map data) {
                 self = dbf.reload(self);
                 getSelf().setStatus(originStatus);
                 self = dbf.updateAndRefresh(self);
@@ -434,7 +449,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             }
 
             @Override
-            public void rollback(FlowTrigger trigger, Map data) {
+            public void rollback(FlowRollback trigger, Map data) {
                 self = dbf.reload(self);
                 getSelf().setStatus(originStatus);
                 self = dbf.updateAndRefresh(self);
@@ -486,13 +501,14 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
 
             @Override
             public void run(FlowTrigger trigger, Map data) {
+                originStatus = getSelf().getStatus();
                 getSelf().setStatus(ApplianceVmStatus.Disconnected);
                 self = dbf.updateAndRefresh(self);
                 trigger.next();
             }
 
             @Override
-            public void rollback(FlowTrigger trigger, Map data) {
+            public void rollback(FlowRollback trigger, Map data) {
                 self = dbf.reload(self);
                 getSelf().setStatus(originStatus);
                 self = dbf.updateAndRefresh(self);
@@ -544,7 +560,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             }
 
             @Override
-            public void rollback(FlowTrigger trigger, Map data) {
+            public void rollback(FlowRollback trigger, Map data) {
                 self = dbf.reload(self);
                 getSelf().setStatus(originStatus);
                 self = dbf.updateAndRefresh(self);
@@ -625,7 +641,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                 List<DiskOfferingVO> vos = dquery.list();
 
                 // allow create multiple data volume from the same disk offering
-                List<DiskOfferingInventory> disks = new ArrayList<DiskOfferingInventory>();
+                List<DiskOfferingInventory> disks = new ArrayList<>();
                 for (final String duuid : msg.getDataDiskOfferingUuids()) {
                     DiskOfferingVO dvo = CollectionUtils.find(vos, new Function<DiskOfferingVO, DiskOfferingVO>() {
                         @Override
@@ -640,7 +656,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                 }
                 spec.setDataDiskOfferings(disks);
             } else {
-                spec.setDataDiskOfferings(new ArrayList<DiskOfferingInventory>(0));
+                spec.setDataDiskOfferings(new ArrayList<>(0));
             }
 
             ImageVO imvo = dbf.findByUuid(spec.getVmInventory().getImageUuid(), ImageVO.class);
@@ -649,6 +665,7 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
             spec.putExtensionData(ApplianceVmConstant.Params.applianceVmSpec.toString(), aspec);
             spec.setCurrentVmOperation(VmInstanceConstant.VmOperation.NewCreate);
             spec.putExtensionData(ApplianceVmConstant.Params.applianceVmSubType.toString(), getSelf().getApplianceVmType());
+            spec.setBootOrders(list(VmBootDevice.HardDisk.toString()));
 
             changeVmStateInDb(VmInstanceStateEvent.starting);
 
@@ -696,7 +713,8 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                     self.setHypervisorType(spec.getDestHost().getHypervisorType());
                     self.setRootVolumeUuid(spec.getDestRootVolume().getUuid());
                     changeVmStateInDb(VmInstanceStateEvent.running);
-                    logger.debug(String.format("appliance vm[uuid:%s, name: %s, type:%s] is running ..", self.getUuid(), self.getName(), getSelf().getApplianceVmType()));
+                    logger.debug(String.format("appliance vm[uuid:%s, name: %s, type:%s] is running ..",
+                            self.getUuid(), self.getName(), getSelf().getApplianceVmType()));
                     VmInstanceInventory inv = VmInstanceInventory.valueOf(self);
                     extEmitter.afterStartNewCreatedVm(inv);
                     StartNewCreatedVmInstanceReply reply = new StartNewCreatedVmInstanceReply();
@@ -723,5 +741,10 @@ public abstract class ApplianceVmBase extends VmInstanceBase implements Applianc
                 taskChain.next();
             }
         }
+    }
+
+    @Override
+    protected void selectDefaultL3(VmNicInventory nic) {
+        return;
     }
 }

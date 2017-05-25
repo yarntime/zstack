@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="120">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip"/>
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip1"/>
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip2"/>
@@ -26,9 +26,16 @@
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip23"/>
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip24"/>
     <TestCase class="org.zstack.test.eip.TestVirtualRouterEip25"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip26"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip27"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip28"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip29"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip30"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip31"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip32"/>
+    <TestCase class="org.zstack.test.eip.TestVirtualRouterEip33"/>
     <TestCase class="org.zstack.test.eip.TestQueryEip1"/>
     <TestCase class="org.zstack.test.eip.TestEipPortForwardingAttachableNic"/>
     <TestCase class="org.zstack.test.eip.TestUpdateVirtualRouterEip"/>
-    <TestCase class="org.zstack.test.eip.TestPolicyForEip"/>
     <TestCase class="org.zstack.test.eip.TestPolicyForEip1"/>
 </UnitTestSuiteConfig>

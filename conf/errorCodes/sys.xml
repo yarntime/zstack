@@ -75,5 +75,15 @@
         <id>1014</id>
         <description>The operation is not implemented or not supported yet</description>
     </code>
+
+    <code>
+        <id>1015</id>
+        <description>Cannot make a HTTP request</description>
+    </code>
+
+    <code>
+        <id>1016</id>
+        <description>Cannot do an IO operation(e.g. network IO error, file IO error)</description>
+    </code>
 </error>
 

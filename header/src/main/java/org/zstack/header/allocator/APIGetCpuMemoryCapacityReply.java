@@ -1,7 +1,9 @@
 package org.zstack.header.allocator;
 
 import org.zstack.header.message.APIReply;
+import org.zstack.header.rest.RestResponse;
 
+@RestResponse(fieldsTo = {"all"})
 public class APIGetCpuMemoryCapacityReply extends APIReply {
     private long totalCpu;
     private long availableCpu;
@@ -27,13 +29,26 @@ public class APIGetCpuMemoryCapacityReply extends APIReply {
     public long getTotalCpu() {
         return totalCpu;
     }
+
     public void setTotalCpu(long totalCpu) {
         this.totalCpu = totalCpu;
     }
+
     public long getTotalMemory() {
         return totalMemory;
     }
+
     public void setTotalMemory(long totalMemory) {
         this.totalMemory = totalMemory;
     }
+ 
+    public static APIGetCpuMemoryCapacityReply __example__() {
+        APIGetCpuMemoryCapacityReply reply = new APIGetCpuMemoryCapacityReply();
+        reply.setAvailableCpu(2);
+        reply.setAvailableMemory(4);
+        reply.setTotalCpu(4);
+        reply.setTotalMemory(8);
+        return reply;
+    }
+
 }

@@ -10,6 +10,7 @@ import org.zstack.header.host.HostInventory;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
+import org.zstack.tag.SystemTagCreator;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
@@ -27,7 +28,7 @@ import static org.zstack.utils.CollectionDSL.map;
 /**
  * 1. add two hosts
  * 2. make two hosts os version mismatch
- *
+ * <p>
  * confirm vm migration will fail
  */
 public class TestMigrateVmOnKvm6 {
@@ -53,11 +54,11 @@ public class TestMigrateVmOnKvm6 {
         dbf = loader.getComponent(DatabaseFacade.class);
         config = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
-}
-    
-	@Test(expected = ApiSenderException.class)
-	public void test() throws ApiSenderException {
-	    final VmInstanceInventory vm = deployer.vms.get("TestVm");
+    }
+
+    @Test(expected = ApiSenderException.class)
+    public void test() throws ApiSenderException {
+        final VmInstanceInventory vm = deployer.vms.get("TestVm");
         HostInventory target = CollectionUtils.find(deployer.hosts.values(), new Function<HostInventory, HostInventory>() {
             @Override
             public HostInventory call(HostInventory arg) {
@@ -68,7 +69,12 @@ public class TestMigrateVmOnKvm6 {
             }
         });
 
-        HostSystemTags.OS_DISTRIBUTION.recreateInherentTag(target.getUuid(), map(e(HostSystemTags.OS_DISTRIBUTION_TOKEN, "some_fake_distribution")));
+        SystemTagCreator creator = HostSystemTags.OS_DISTRIBUTION.newSystemTagCreator(target.getUuid());
+        creator.setTagByTokens(map(e(HostSystemTags.OS_DISTRIBUTION_TOKEN, "some_fake_distribution")));
+        creator.inherent = true;
+        creator.recreate = true;
+        creator.create();
+
         api.migrateVmInstance(vm.getUuid(), target.getUuid());
-	}
+    }
 }

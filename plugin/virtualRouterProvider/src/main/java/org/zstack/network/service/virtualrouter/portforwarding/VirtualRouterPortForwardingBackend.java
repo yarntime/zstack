@@ -29,12 +29,12 @@ import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.function.Function;
 
+import static org.zstack.core.Platform.operr;
+
 import javax.persistence.TypedQuery;
 import java.util.*;
 
-public class VirtualRouterPortForwardingBackend implements PortForwardingBackend, Component {
-    @Autowired
-    protected VirtualRouterManager vrMgr;
+public class VirtualRouterPortForwardingBackend extends AbstractVirtualRouterBackend implements PortForwardingBackend, Component {
     @Autowired
     protected DatabaseFacade dbf;
     @Autowired
@@ -132,17 +132,19 @@ public class VirtualRouterPortForwardingBackend implements PortForwardingBackend
         }
 
         final PortForwardingStruct struct = it.next();
-        vrMgr.acquireVirtualRouterVm(struct.getGuestL3Network(), new VirtualRouterOfferingValidator() {
+        VirtualRouterStruct s = new VirtualRouterStruct();
+        s.setL3Network(struct.getGuestL3Network());
+        s.setOfferingValidator(new VirtualRouterOfferingValidator() {
             @Override
             public void validate(VirtualRouterOfferingInventory offering) throws OperationFailureException {
                 if (!offering.getPublicNetworkUuid().equals(struct.getVip().getL3NetworkUuid())) {
-                    throw new OperationFailureException(errf.stringToOperationError(
-                            String.format("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to PortForwarding rule[uuid:%s]'s; you may need to use system tag" +
-                                    " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), struct.getGuestL3Network().getUuid(), struct.getGuestL3Network().getZoneUuid(), struct.getVip().getL3NetworkUuid(), struct.getRule().getUuid())
-                    ));
+                    throw new OperationFailureException(operr("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to PortForwarding rule[uuid:%s]'s; you may need to use system tag" +
+                                    " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), struct.getGuestL3Network().getUuid(), struct.getGuestL3Network().getZoneUuid(), struct.getVip().getL3NetworkUuid(), struct.getRule().getUuid()));
                 }
             }
-        }, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
+        });
+
+        acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
             @Override
             public void success(final VirtualRouterVmInventory vr) {
                 applyRule(struct, vr, new Completion(completion) {
@@ -202,10 +204,8 @@ public class VirtualRouterPortForwardingBackend implements PortForwardingBackend
     public void applyPortForwardingRule(PortForwardingStruct struct, Completion completion) {
         PortForwardingRuleInventory rule = struct.getRule();
         if ((rule.getVipPortStart() != rule.getPrivatePortStart() || rule.getVipPortEnd() != rule.getPrivatePortEnd()) && (rule.getVipPortStart() != rule.getVipPortEnd()) && (rule.getPrivatePortStart() != rule.getPrivatePortEnd())) {
-            throw new OperationFailureException(errf.stringToOperationError(
-                    String.format("virtual router doesn't support port forwarding range redirection, the vipPortStart must be equals to privatePortStart and vipPortEnd must be equals to privatePortEnd;" +
-                            "but this rule rule has a mismatching range: vip port[%s, %s], private port[%s, %s]", rule.getVipPortStart(), rule.getVipPortEnd(), rule.getPrivatePortStart(), rule.getPrivatePortEnd())
-            ));
+            throw new OperationFailureException(operr("virtual router doesn't support port forwarding range redirection, the vipPortStart must be equals to privatePortStart and vipPortEnd must be equals to privatePortEnd;" +
+                            "but this rule rule has a mismatching range: vip port[%s, %s], private port[%s, %s]", rule.getVipPortStart(), rule.getVipPortEnd(), rule.getPrivatePortStart(), rule.getPrivatePortEnd()));
         }
 
         applyRule(Arrays.asList(struct).iterator(), completion);

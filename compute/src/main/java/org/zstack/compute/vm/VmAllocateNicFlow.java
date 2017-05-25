@@ -12,12 +12,12 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.core.workflow.Flow;
 import org.zstack.header.core.workflow.FlowException;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.*;
 import org.zstack.header.vm.*;
-import org.zstack.header.vm.VmInstanceConstant.VmOperation;
 import org.zstack.identity.AccountManager;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
+
+import static org.zstack.core.progress.ProgressReportService.taskProgress;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class VmAllocateNicFlow implements Flow {
@@ -47,10 +49,11 @@ public class VmAllocateNicFlow implements Flow {
                 vo = dbf.persistAndRefresh(vo);
                 return vo;
             } catch (JpaSystemException e) {
-                if (e.getRootCause() instanceof MySQLIntegrityConstraintViolationException && e.getRootCause().getMessage().contains("Duplicate entry")) {
-                    logger.debug(String
-                            .format("Concurrent mac allocation. Mac[%s] has been allocated, try allocating another one. The error[Duplicate entry] printed by jdbc.spi.SqlExceptionHelper is no harm, we will try finding another mac",
-                                    vo.getMac()));
+                if (e.getRootCause() instanceof MySQLIntegrityConstraintViolationException &&
+                        e.getRootCause().getMessage().contains("Duplicate entry")) {
+                    logger.debug(String.format("Concurrent mac allocation. Mac[%s] has been allocated, try allocating another one. " +
+                            "The error[Duplicate entry] printed by jdbc.spi.SqlExceptionHelper is no harm, " +
+                            "we will try finding another mac", vo.getMac()));
                     logger.trace("", e);
                     vo.setMac(NetworkUtils.generateMacWithDeviceId((short) vo.getDeviceId()));
                 } else {
@@ -83,17 +86,17 @@ public class VmAllocateNicFlow implements Flow {
 
     @Override
     public void run(final FlowTrigger trigger, final Map data) {
+        taskProgress("create nics");
+
         final VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
+
         List<AllocateIpMsg> msgs = new ArrayList<AllocateIpMsg>();
+        Map<String, String> vmStaticIps = new StaticIpOperator().getStaticIpbyVmUuid(spec.getVmInventory().getUuid());
         for (final L3NetworkInventory nw : spec.getL3Networks()) {
             AllocateIpMsg msg = new AllocateIpMsg();
-
-            List<Map<String, String>> tokenList = VmSystemTags.STATIC_IP.getTokensOfTagsByResourceUuid(spec.getVmInventory().getUuid());
-            for (Map<String, String> tokens : tokenList) {
-                String l3Uuid = tokens.get(VmSystemTags.STATIC_IP_L3_UUID_TOKEN);
-                if (l3Uuid.equals(nw.getUuid())) {
-                    msg.setRequiredIp(tokens.get(VmSystemTags.STATIC_IP_TOKEN));
-                }
+            String staticIp = vmStaticIps.get(nw.getUuid());
+            if (staticIp != null) {
+                msg.setRequiredIp(staticIp);
             }
 
             msg.setL3NetworkUuid(nw.getUuid());
@@ -123,6 +126,7 @@ public class VmAllocateNicFlow implements Flow {
                         nic.setUsedIpUuid(areply.getIpInventory().getUuid());
                         nic.setVmInstanceUuid(spec.getVmInventory().getUuid());
                         nic.setL3NetworkUuid(areply.getIpInventory().getL3NetworkUuid());
+                        assert nic.getL3NetworkUuid() != null;
                         nic.setMac(NetworkUtils.generateMacWithDeviceId((short) deviceId));
                         nic.setDeviceId(deviceId);
                         nic.setNetmask(areply.getIpInventory().getNetmask());
@@ -151,7 +155,7 @@ public class VmAllocateNicFlow implements Flow {
     }
 
     @Override
-    public void rollback(final FlowTrigger chain, Map data) {
+    public void rollback(final FlowRollback chain, Map data) {
         VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
         final List<VmNicInventory> destNics = spec.getDestNics();
         if (destNics.isEmpty()) {

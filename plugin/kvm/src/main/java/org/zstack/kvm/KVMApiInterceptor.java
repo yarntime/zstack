@@ -9,6 +9,7 @@ import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.message.APIMessage;
+import static org.zstack.core.Platform.argerr;
 
 /**
  */
@@ -27,13 +28,14 @@ public class KVMApiInterceptor implements ApiMessageInterceptor {
         return msg;
     }
 
+
     private void validate(APIAddKVMHostMsg msg) {
         SimpleQuery<KVMHostVO> q = dbf.createQuery(KVMHostVO.class);
         q.add(KVMHostVO_.managementIp, Op.EQ, msg.getManagementIp());
         if (q.isExists()) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("there has been a kvm host having management ip[%s]", msg.getManagementIp())
-            ));
+            throw new ApiMessageInterceptionException(argerr("there has been a kvm host having management ip[%s]", msg.getManagementIp()));
         }
     }
+
+
 }

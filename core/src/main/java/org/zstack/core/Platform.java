@@ -1,24 +1,33 @@
 package org.zstack.core;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.LocaleUtils;
+import org.apache.commons.lang.StringUtils;
+import org.reflections.Reflections;
+import org.reflections.scanners.*;
+import org.reflections.util.ClasspathHelper;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.context.MessageSource;
+import org.springframework.context.NoSuchMessageException;
 import org.springframework.web.context.WebApplicationContext;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.componentloader.ComponentLoaderImpl;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseGlobalProperty;
+import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.core.statemachine.StateMachine;
 import org.zstack.core.statemachine.StateMachineImpl;
 import org.zstack.header.Component;
+import org.zstack.header.core.encrypt.ENCRYPT;
+import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
-import org.zstack.header.tag.SystemTagVO;
-import org.zstack.utils.BeanUtils;
-import org.zstack.utils.Linux;
-import org.zstack.utils.StringDSL;
-import org.zstack.utils.TypeUtils;
+import org.zstack.utils.*;
 import org.zstack.utils.data.StringTemplate;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.logging.CLoggerImpl;
+import org.zstack.utils.network.NetworkUtils;
 import org.zstack.utils.path.PathUtil;
 
 import java.io.File;
@@ -26,11 +35,18 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+
+import static org.zstack.utils.CollectionDSL.e;
+import static org.zstack.utils.CollectionDSL.map;
+import static org.zstack.utils.StringDSL.ln;
 
 public class Platform {
     private static final CLogger logger = CLoggerImpl.getLogger(Platform.class);
@@ -39,10 +55,25 @@ public class Platform {
     private static String msId;
     private static String codeVersion;
     private static String managementServerIp;
+    private static String managementCidr;
+    private static MessageSource messageSource;
 
     public static final String COMPONENT_CLASSPATH_HOME = "componentsHome";
+    public static final String FAKE_UUID = "THIS_IS_IS_A_FAKE_UUID";
 
     private static final Map<String, String> globalProperties = new HashMap<String, String>();
+
+    private static Locale locale;
+
+    public static volatile boolean IS_RUNNING = true;
+
+    private static Reflections reflections;
+
+    public static Reflections getReflections() {
+        return reflections;
+    }
+
+    public static Set<Method> encryptedMethodsMap;
 
     private static Map<String, String> linkGlobalPropertyMap(String prefix) {
         Map<String, String> ret = new HashMap<String, String>();
@@ -53,7 +84,7 @@ public class Platform {
 
         for (Map.Entry<String, String> e : map.entrySet()) {
             String key = StringDSL.stripStart(e.getKey(), prefix).trim();
-            ret.put(key, e.getValue());
+            ret.put(key, e.getValue().trim());
         }
 
         return ret;
@@ -85,7 +116,7 @@ public class Platform {
                 }
                 valueToSet = ret;
             } else {
-                String value = getGlobalProperty(name);
+                String value = propertiesMap.get(name);
                 if (value == null && at.defaultValue().equals(GlobalProperty.DEFAULT_NULL_STRING) && at.required()) {
                     throw new IllegalArgumentException(String.format("A required global property[%s] missing in zstack.properties", name));
                 }
@@ -99,7 +130,7 @@ public class Platform {
                 }
 
                 if (value != null) {
-                    value = StringTemplate.subsititute(value, propertiesMap);
+                    value = StringTemplate.substitute(value, propertiesMap);
                 }
 
                 if (Integer.class.isAssignableFrom(f.getType()) || Integer.TYPE.isAssignableFrom(f.getType())) {
@@ -142,31 +173,43 @@ public class Platform {
             return ret;
         }
 
-        for (Map.Entry<String, String> e : map.entrySet()) {
-            String index = StringDSL.stripStart(e.getKey(), name).trim();
+        List<String> orderedKeys = new ArrayList<String>();
+        orderedKeys.addAll(map.keySet());
+        Collections.sort(orderedKeys);
+
+        for (String key : orderedKeys) {
+            String index = StringDSL.stripStart(key, name).trim();
             try {
-                int i = Integer.valueOf(index);
-                if (i >= map.size()) {
-                    throw new IllegalArgumentException(String.format("[Illegal List Definition] %s is not a correct list definition, its index is %s, but total items are %s. Max index is size of items minus 1",
-                            e.getKey(), i, map.size()));
-                }
-                ret.add(i, e.getValue());
-            } catch (Exception ex) {
-                throw new IllegalArgumentException(String.format("[Illegal List Definition] %s is not a correct list definition, the end character must be a number, for example %s.1",
-                        e.getKey(), name), ex);
+                Long.valueOf(index);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(String.format("[Illegal List Definition] %s is an invalid list key" +
+                        " definition, the last character must be a number, for example %s1. %s is not a number", key, key, index));
+
             }
+
+            ret.add(map.get(key));
         }
 
         return ret;
     }
 
     private static void linkGlobalProperty() {
-        List<Class> clzs = BeanUtils.scanClass("org.zstack", GlobalPropertyDefinition.class);
+        Set<Class<?>> clzs = reflections.getTypesAnnotatedWith(GlobalPropertyDefinition.class);
 
+        boolean noTrim = System.getProperty("DoNotTrimPropertyFile") != null;
+
+        List<String> lst = new ArrayList<String>();
         Map<String, String> propertiesMap = new HashMap<String, String>();
         for (final String name: System.getProperties().stringPropertyNames()) {
-            propertiesMap.put(name, System.getProperty(name));
+            String value = System.getProperty(name);
+            if (!noTrim) {
+                value = value.trim();
+            }
+            propertiesMap.put(name, value);
+            lst.add(String.format("%s=%s", name, value));
         }
+
+        logger.debug(String.format("system properties:\n%s", StringUtils.join(lst, ",")));
 
         for (Class clz : clzs) {
             linkGlobalProperty(clz, propertiesMap);
@@ -209,12 +252,28 @@ public class Platform {
             }
 
             if (getGlobalProperty("DbFacadeDataSource.jdbcUrl") == null) {
-                String url = String.format("%s/zstack", dbUrl);
+                String url;
+                if (dbUrl.contains("{database}")) {
+                    url = ln(dbUrl).formatByMap(
+                            map(e("database", "zstack"))
+                    );
+                } else {
+                    url = String.format("%s/zstack", dbUrl);
+                }
+
                 System.setProperty("DbFacadeDataSource.jdbcUrl", url);
                 logger.debug(String.format("default DbFacadeDataSource.jdbcUrl to DB.url [%s]", url));
             }
             if (getGlobalProperty("RESTApiDataSource.jdbcUrl") == null) {
-                String url = String.format("%s/zstack_rest", dbUrl);
+                String url;
+                if (dbUrl.contains("{database}")) {
+                    url = ln(dbUrl).formatByMap(
+                            map(e("database", "zstack_rest"))
+                    );
+                } else {
+                    url = String.format("%s/zstack_rest", dbUrl);
+                }
+
                 System.setProperty("RESTApiDataSource.jdbcUrl", url);
                 logger.debug(String.format("default RESTApiDataSource.jdbcUrl to DB.url [%s]", url));
             }
@@ -270,22 +329,77 @@ public class Platform {
     }
 
     static {
-        msId = getUuid();
-
-        // TODO: get code version from MANIFEST file
-        codeVersion = "0.1.0";
-
         try {
+            msId = getUuid();
+
+            reflections = new Reflections(ClasspathHelper.forPackage("org.zstack"),
+                    new SubTypesScanner(), new MethodAnnotationsScanner(), new FieldAnnotationsScanner(),
+                    new MemberUsageScanner(), new MethodParameterNamesScanner(), new ResourcesScanner(),
+                    new TypeAnnotationsScanner(), new TypeElementsScanner(), new MethodParameterScanner());
+
+            // TODO: get code version from MANIFEST file
+            codeVersion = "0.1.0";
+
             File globalPropertiesFile = PathUtil.findFileOnClassPath("zstack.properties", true);
             FileInputStream in = new FileInputStream(globalPropertiesFile);
             System.getProperties().load(in);
 
             linkGlobalProperty();
             prepareDefaultDbProperties();
+            callStaticInitMethods();
+            encryptedMethodsMap = getAllEncryptPassword();
             writePidFile();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } catch (Throwable e) {
+            logger.warn(String.format("unhandled exception when in Platform's static block, %s", e.getMessage()), e);
+            new BootErrorLog().write(e.getMessage());
+            if (CoreGlobalProperty.EXIT_JVM_ON_BOOT_FAILURE) {
+                System.exit(1);
+            } else {
+                throw new RuntimeException(e);
+            }
+
         }
+    }
+
+    private static Set<Method> getAllEncryptPassword() {
+        Set<Method> encrypteds = reflections.getMethodsAnnotatedWith(ENCRYPT.class);
+        for (Method encrypted: encrypteds) {
+            logger.debug(String.format("found encrypted method[%s:%s]", encrypted.getDeclaringClass(), encrypted.getName()));
+        }
+        return encrypteds;
+    }
+
+    private static void callStaticInitMethods() throws InvocationTargetException, IllegalAccessException {
+        Set<Method> inits = reflections.getMethodsAnnotatedWith(StaticInit.class);
+        for (Method init : inits)  {
+            if (!Modifier.isStatic(init.getModifiers())) {
+                throw new CloudRuntimeException(String.format("the method[%s:%s] annotated by @StaticInit is not a static method", init.getDeclaringClass(), init.getName()));
+            }
+
+            logger.debug(String.format("calling static init method[%s:%s]", init.getDeclaringClass(), init.getName()));
+            init.setAccessible(true);
+            init.invoke(null);
+        }
+    }
+
+    private static void initMessageSource() {
+        locale = LocaleUtils.toLocale(CoreGlobalProperty.LOCALE);
+        logger.debug(String.format("using locale[%s] for i18n logging messages", locale.toString()));
+
+        if (loader == null) {
+            throw new CloudRuntimeException("ComponentLoader is null. i18n has not been initialized, you call it too early");
+        }
+
+        BeanFactory beanFactory = loader.getSpringIoc();
+        if (beanFactory == null) {
+            throw new CloudRuntimeException("BeanFactory is null. i18n has not been initialized, you call it too early");
+        }
+
+        if (!(beanFactory instanceof MessageSource)) {
+            throw new CloudRuntimeException("BeanFactory is not a spring MessageSource. i18n cannot be used");
+        }
+
+        messageSource = (MessageSource)beanFactory;
     }
 
     private static CloudBus bus;
@@ -376,6 +490,8 @@ public class Platform {
             bus.start();
         }
 
+        initMessageSource();
+
         return loader;
     }
 
@@ -383,7 +499,7 @@ public class Platform {
 		/*
 		 * This part cannot be moved to static block at the beginning.
 		 * Because component code loaded by Spring may call other functions in Platform which
-		 * causes the static block to be executed, and results in cycle initialization of ComponentLoaderImpl.
+		 * causes the static block to be executed, which results in cycle initialization of ComponentLoaderImpl.
 		 */
         if (loader == null) {
             loader = createComponentLoaderFromWebApplicationContext(null);
@@ -406,6 +522,20 @@ public class Platform {
 
     public static String getUuid() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public static String getManagementCidr() {
+        if (managementCidr != null) {
+            return managementCidr;
+        }
+
+        String mgmtIp = getManagementServerIp();
+        managementCidr = ShellUtils.run(String.format("ip addr | grep -w %s | awk '{print $2}'", mgmtIp));
+        managementCidr = StringDSL.stripEnd(managementCidr, "\n");
+        if (!NetworkUtils.isCidr(managementCidr)) {
+            throw new CloudRuntimeException(String.format("got an invalid management CIDR[%s]", managementCidr));
+        }
+        return managementCidr;
     }
 
     public static String getManagementServerIp() {
@@ -460,5 +590,92 @@ public class Platform {
         logger.info(String.format("get management IP[%s] from default route[/sbin/ip route]", ip));
         managementServerIp = ip;
         return managementServerIp;
+    }
+
+    public static String toI18nString(String code, Object... args) {
+        return toI18nString(code, null, args);
+    }
+
+    public static String toI18nString(String code, Locale l, List args) {
+        return toI18nString(code, l, args.toArray(new Object[args.size()]));
+    }
+
+    public static String toI18nString(String code, Locale l, Object...args) {
+        l = l == null ? locale : l;
+
+        try {
+            String ret;
+            if (args.length > 0) {
+                 ret = messageSource.getMessage(code, args, l);
+            } else {
+                 ret = messageSource.getMessage(code, null, l);
+            }
+
+            // if the result is an empty string which means the string is not translated in the locale,
+            // return the original string so users won't get a confusing, empty string
+            return ret.isEmpty() ? String.format(code, args) : ret;
+        } catch (NoSuchMessageException e) {
+            return String.format(code, args);
+        }
+    }
+
+    public static String i18n(String str, Object...args) {
+        if (args != null) {
+            return String.format(str, args);
+        } else {
+            return str;
+        }
+    }
+
+    public static boolean killProcess(int pid) {
+        return killProcess(pid, 15);
+    }
+
+    public static boolean killProcess(int pid, Integer timeout) {
+        timeout = timeout == null ? 30 : timeout;
+
+        if (!TimeUtils.loopExecuteUntilTimeoutIgnoreExceptionAndReturn(timeout, 1, TimeUnit.SECONDS, () -> {
+            ShellUtils.runAndReturn(String.format("kill %s", pid));
+            return !new ProcessFinder().processExists(pid);
+        })) {
+            logger.warn(String.format("cannot kill the process[PID:%s] after %s seconds, kill -9 it", pid, timeout));
+            ShellUtils.runAndReturn(String.format("kill -9 %s", pid));
+        }
+
+        if (!TimeUtils.loopExecuteUntilTimeoutIgnoreExceptionAndReturn(5, 1, TimeUnit.SECONDS, () -> !new ProcessFinder().processExists(pid))) {
+            logger.warn(String.format("FAILED TO KILL -9 THE PROCESS[PID:%s], THE KERNEL MUST HAVE SOMETHING RUN", pid));
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    public static ErrorCode err(Enum errCode, String fmt, Object...args) {
+        ErrorFacade errf = getComponentLoader().getComponent(ErrorFacade.class);
+        if (SysErrors.INTERNAL == errCode) {
+            return errf.instantiateErrorCode(errCode, String.format(fmt, args));
+        } else {
+            return errf.instantiateErrorCode(errCode, i18n(fmt, args));
+        }
+    }
+
+    public static ErrorCode inerr(String fmt, Object...args) {
+        return err(SysErrors.INTERNAL, fmt, args);
+    }
+
+    public static ErrorCode operr(String fmt, Object...args) {
+        return err(SysErrors.OPERATION_ERROR, fmt, args);
+    }
+
+    public static ErrorCode argerr(String fmt, Object...args) {
+        return err(SysErrors.INVALID_ARGUMENT_ERROR, fmt, args);
+    }
+
+    public static ErrorCode ioerr(String fmt, Object...args) {
+        return err(SysErrors.IO_ERROR, fmt, args);
+    }
+
+    public static ErrorCode httperr(String fmt, Object...args) {
+        return err(SysErrors.HTTP_ERROR, fmt, args);
     }
 }

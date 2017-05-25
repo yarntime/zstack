@@ -11,13 +11,12 @@ import org.zstack.core.thread.AsyncThread;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.rest.RESTFacade;
 import org.zstack.kvm.KVMAgentCommands.AgentResponse;
+import org.zstack.simulator.AsyncRESTReplyer;
+import org.zstack.simulator.kvm.VolumeSnapshotKvmSimulator;
 import org.zstack.storage.primary.nfs.NfsPrimaryStorageKVMBackend;
 import org.zstack.storage.primary.nfs.NfsPrimaryStorageKVMBackendCommands.*;
 import org.zstack.storage.primary.nfs.NfsPrimaryToSftpBackupKVMBackend;
-import org.zstack.simulator.AsyncRESTReplyer;
-import org.zstack.simulator.kvm.VolumeSnapshotKvmSimulator;
 import org.zstack.utils.Utils;
-import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
@@ -60,6 +59,16 @@ public class NfsPrimaryStorageSimulator {
         GetCapacityResponse rsp = new GetCapacityResponse();
         setCapacity(cmd, rsp);
         reply(entity, rsp);
+    }
+
+    @RequestMapping(value=NfsPrimaryStorageKVMBackend.GET_VOLUME_BASE_IMAGE_PATH, method=RequestMethod.POST)
+    private @ResponseBody String getVolumeBaseImagePath(HttpServletRequest req) throws InterruptedException {
+        HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
+        GetVolumeBaseImagePathCmd cmd = JSONObjectUtil.toObject(entity.getBody(), GetVolumeBaseImagePathCmd.class);
+        GetVolumeBaseImagePathRsp rsp = new GetVolumeBaseImagePathRsp();
+        rsp.path = config.getVolumeBaseImagePaths.get(cmd.volumeUUid);
+        reply(entity, rsp);
+        return null;
     }
 
     @RequestMapping(value=NfsPrimaryStorageKVMBackend.UNMOUNT_PRIMARY_STORAGE_PATH, method=RequestMethod.POST)
@@ -157,6 +166,21 @@ public class NfsPrimaryStorageSimulator {
         return null;
     }
 
+    @RequestMapping(value=NfsPrimaryStorageKVMBackend.PING_PATH, method=RequestMethod.POST)
+    private @ResponseBody String ping(HttpServletRequest req) throws InterruptedException {
+        HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
+        NfsPrimaryStorageAgentResponse rsp = new NfsPrimaryStorageAgentResponse();
+        if (!config.pingSuccess) {
+            rsp.setError("on purpose");
+            rsp.setSuccess(false);
+        } else {
+            config.pingCmds.add(JSONObjectUtil.toObject(entity.getBody(), PingCmd.class));
+        }
+
+        reply(entity, rsp);
+        return null;
+    }
+
     @RequestMapping(value=NfsPrimaryStorageKVMBackend.DELETE_PATH, method=RequestMethod.POST)
     private @ResponseBody String delete(HttpServletRequest req) throws InterruptedException {
         HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
@@ -207,6 +231,7 @@ public class NfsPrimaryStorageSimulator {
         } else {
             logger.debug(entity.getBody());
             config.downloadFromSftpCmds.add(cmd);
+            config.imageCache.add(cmd.getPrimaryStorageInstallPath());
         }
 
         reply(entity, rsp);
@@ -318,11 +343,29 @@ public class NfsPrimaryStorageSimulator {
             rsp.setError("on purpose");
             rsp.setSuccess(false);
         } else {
-            rsp.setSize(SizeUnit.MEGABYTE.toByte(500));
+            Long size = config.rebaseAndMergeSnapshotsCmdSize.get(cmd.getVolumeUuid());
+            rsp.setSize(size == null ? 0 : size);
+            Long aszie = config.rebaseAndMergeSnapshotsCmdActualSize.get(cmd.getVolumeUuid());
+            rsp.setActualSize(aszie == null ? 0 : aszie);
             config.rebaseAndMergeSnapshotsCmds.add(cmd);
         }
 
         reply(entity, rsp);
+    }
+
+    @RequestMapping(value=NfsPrimaryStorageKVMBackend.GET_VOLUME_SIZE_PATH, method=RequestMethod.POST)
+    private @ResponseBody String getVolumeSize(HttpServletRequest req) throws InterruptedException {
+        HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
+        GetVolumeActualSizeCmd cmd = JSONObjectUtil.toObject(entity.getBody(), GetVolumeActualSizeCmd.class);
+        config.getVolumeSizeCmds.add(cmd);
+
+        GetVolumeActualSizeRsp rsp = new GetVolumeActualSizeRsp();
+        Long asize = config.getVolumeSizeCmdActualSize.get(cmd.volumeUuid);
+        rsp.actualSize = asize == null ? 0 : asize;
+        Long size = config.getVolumeSizeCmdSize.get(cmd.volumeUuid);
+        rsp.size = size == null ? 0 : size;
+        reply(entity, rsp);
+        return null;
     }
 
     @RequestMapping(value=NfsPrimaryStorageKVMBackend.MERGE_SNAPSHOT_PATH, method=RequestMethod.POST)
@@ -340,7 +383,10 @@ public class NfsPrimaryStorageSimulator {
             rsp.setError("on purpose");
             rsp.setSuccess(false);
         } else {
-            rsp.setSize(SizeUnit.MEGABYTE.toByte(500));
+            Long size = config.mergeSnapshotCmdSize.get(cmd.getVolumeUuid());
+            rsp.setSize(size == null ? 0 : size);
+            Long asize = config.mergeSnapshotCmdActualSize.get(cmd.getVolumeUuid());
+            rsp.setActualSize(asize == null ? 0 : asize);
             config.mergeSnapshotCmds.add(cmd);
         }
         reply(entity, rsp);
@@ -367,8 +413,37 @@ public class NfsPrimaryStorageSimulator {
             rsp.setError("failed on purpose");
             rsp.setSuccess(false);
         } else {
-            logger.debug(String.format("create empty volume[uuid:%s,  path:%s, size:%s]", cmd.getUuid(), cmd.getInstallUrl(), cmd.getSize()));
+            logger.debug(String.format("create empty volume[uuid:%s,  mountPath:%s, size:%s]", cmd.getUuid(), cmd.getInstallUrl(), cmd.getSize()));
         }
         reply(entity, rsp);
+    }
+
+    @RequestMapping(value=NfsPrimaryStorageKVMBackend.REMOUNT_PATH, method=RequestMethod.POST)
+    private @ResponseBody String remount(HttpServletRequest req) throws InterruptedException {
+        HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
+        RemountCmd cmd = JSONObjectUtil.toObject(entity.getBody(), RemountCmd.class);
+        NfsPrimaryStorageAgentResponse rsp = new NfsPrimaryStorageAgentResponse();
+        if (!config.remountSuccess) {
+            rsp.setError("on purpose");
+            rsp.setSuccess(false);
+        } else {
+            rsp.setTotalCapacity(config.totalCapacity);
+            rsp.setAvailableCapacity(config.availableCapacity);
+            config.remountCmds.add(cmd);
+        }
+        reply(entity, rsp);
+        return null;
+    }
+
+    @RequestMapping(value=NfsPrimaryStorageKVMBackend.UPDATE_MOUNT_POINT_PATH, method=RequestMethod.POST)
+    private @ResponseBody String updateMountPoint(HttpServletRequest req) throws InterruptedException {
+        HttpEntity<String> entity = restf.httpServletRequestToHttpEntity(req);
+        UpdateMountPointCmd cmd = JSONObjectUtil.toObject(entity.getBody(), UpdateMountPointCmd.class);
+        UpdateMountPointRsp rsp = new UpdateMountPointRsp();
+        config.updateMountPointCmds.add(cmd);
+        rsp.setTotalCapacity(config.totalCapacity);
+        rsp.setAvailableCapacity(config.availableCapacity);
+        reply(entity, rsp);
+        return null;
     }
 }

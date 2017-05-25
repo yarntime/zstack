@@ -1,6 +1,5 @@
 package org.zstack.header.network.l2;
 
-import org.zstack.header.tag.AutoDeleteTag;
 import org.zstack.header.vo.EO;
 import org.zstack.header.vo.NoView;
 
@@ -11,11 +10,9 @@ import java.util.Set;
 @Entity
 @Table
 @EO(EOClazz = L2NetworkEO.class)
-@Inheritance(strategy=InheritanceType.JOINED)
-@AutoDeleteTag
 public class L2NetworkVO extends L2NetworkAO {
-    @OneToMany(fetch=FetchType.EAGER)
-    @JoinColumn(name="l2NetworkUuid", insertable=false, updatable=false)
+    @OneToMany(fetch = FetchType.EAGER)
+    @JoinColumn(name = "l2NetworkUuid", insertable = false, updatable = false)
     @NoView
     private Set<L2NetworkClusterRefVO> attachedClusterRefs = new HashSet<L2NetworkClusterRefVO>();
 

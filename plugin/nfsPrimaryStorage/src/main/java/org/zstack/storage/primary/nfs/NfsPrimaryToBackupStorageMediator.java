@@ -2,11 +2,10 @@ package org.zstack.storage.primary.nfs;
 
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
-import org.zstack.header.host.HostInventory;
-import org.zstack.header.image.ImageInventory;
 import org.zstack.header.storage.backup.BackupStorageInventory;
-import org.zstack.header.storage.primary.*;
-import org.zstack.header.storage.snapshot.VolumeSnapshotInventory;
+import org.zstack.header.storage.primary.ImageCacheInventory;
+import org.zstack.header.storage.primary.PrimaryStorageInventory;
+import org.zstack.header.storage.primary.PrimaryToBackupStorageMediator;
 import org.zstack.header.volume.VolumeInventory;
 
 public interface NfsPrimaryToBackupStorageMediator extends PrimaryToBackupStorageMediator {
@@ -15,7 +14,7 @@ public interface NfsPrimaryToBackupStorageMediator extends PrimaryToBackupStorag
 
     void downloadBits(PrimaryStorageInventory pinv, BackupStorageInventory bsinv, String backupStorageInstallPath, String primaryStorageInstallPath, Completion completion);
 
-    void uploadBits(PrimaryStorageInventory pinv, BackupStorageInventory bsinv, String backupStorageInstallPath, String primaryStorageInstallPath, Completion completion);
+    void uploadBits(String imageUuid, PrimaryStorageInventory pinv, BackupStorageInventory bsinv, String backupStorageInstallPath, String primaryStorageInstallPath, ReturnValueCompletion<String> completion);
 
     String makeRootVolumeTemplateInstallPath(String backupStorageUuid, String imageUuid);
 

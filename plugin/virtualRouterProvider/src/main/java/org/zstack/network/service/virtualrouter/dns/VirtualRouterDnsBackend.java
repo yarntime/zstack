@@ -5,6 +5,7 @@ import org.zstack.appliancevm.ApplianceVmStatus;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
@@ -25,21 +26,23 @@ import org.zstack.utils.function.Function;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
 /**
  */
-public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
+public class VirtualRouterDnsBackend extends AbstractVirtualRouterBackend implements NetworkServiceDnsBackend {
     private final CLogger logger = Utils.getLogger(VirtualRouterDnsBackend.class);
 
-    @Autowired
-    private VirtualRouterManager vrMgr;
     @Autowired
     private CloudBus bus;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     @Override
     public NetworkServiceProviderType getProviderType() {
@@ -55,10 +58,11 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
         }
 
         SetDnsCmd cmd = new SetDnsCmd();
-        cmd.setDns(CollectionUtils.transformToList(dns, new Function<DnsInfo, String>() {
+        cmd.setDns(CollectionUtils.transformToList(l3.getDns(), new Function<DnsInfo, String>() {
             @Override
             public DnsInfo call(String arg) {
                 DnsInfo info = new DnsInfo();
+                info.setNicMac(vr.getGuestNic().getMac());
                 info.setDnsAddress(arg);
                 return info;
             }
@@ -68,6 +72,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setPath(VirtualRouterConstant.VR_SET_DNS_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setCheckStatus(true);
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -81,7 +86,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                 VirtualRouterAsyncHttpCallReply r = reply.castReply();
                 SetDnsRsp rsp = r.toResponse(SetDnsRsp.class);
                 if (!rsp.isSuccess()) {
-                    completion.fail(errf.stringToOperationError(rsp.getError()));
+                    completion.fail(operr(rsp.getError()));
                     return;
                 }
 
@@ -104,6 +109,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
             public DnsInfo call(String arg) {
                 DnsInfo info = new DnsInfo();
                 info.setDnsAddress(arg);
+                info.setNicMac(vr.getGuestNic().getMac());
                 return info;
             }
         }));
@@ -112,6 +118,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setPath(VirtualRouterConstant.VR_REMOVE_DNS_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setCheckStatus(true);
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -125,7 +132,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                 VirtualRouterAsyncHttpCallReply r = reply.castReply();
                 RemoveDnsRsp rsp = r.toResponse(RemoveDnsRsp.class);
                 if (!rsp.isSuccess()) {
-                    completion.fail(errf.stringToOperationError(rsp.getError()));
+                    completion.fail(operr(rsp.getError()));
                     return;
                 }
 
@@ -142,14 +149,18 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
 
         final DnsStruct struct = it.next();
         final L3NetworkInventory l3 = struct.getL3Network();
-        vrMgr.acquireVirtualRouterVm(struct.getL3Network(), spec, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
 
+        VirtualRouterStruct s = new VirtualRouterStruct();
+        s.setL3Network(l3);
+
+        acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
             @Override
             public void success(final VirtualRouterVmInventory vr) {
                 final List<VirtualRouterCommands.DnsInfo> dns = new ArrayList<VirtualRouterCommands.DnsInfo>(l3.getDns().size());
                 for (String d : l3.getDns()) {
                     VirtualRouterCommands.DnsInfo dinfo = new VirtualRouterCommands.DnsInfo();
                     dinfo.setDnsAddress(d);
+                    dinfo.setNicMac(vr.getGuestNic().getMac());
                     dns.add(dinfo);
                 }
 
@@ -160,6 +171,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                 msg.setVmInstanceUuid(vr.getUuid());
                 msg.setPath(VirtualRouterConstant.VR_SET_DNS_PATH);
                 msg.setCommand(cmd);
+                msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
                 msg.setCheckStatus(true);
                 bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
                 bus.send(msg, new CloudBusCallBack(completion) {
@@ -178,10 +190,9 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                                     .getIp()));
                             applyDns(it, spec, completion);
                         } else {
-                            String err = String.format("virtual router[uuid:%s, ip:%s] failed to configure dns%s for L3Network[uuid:%s, name:%s], %s",
+                            ErrorCode err = operr("virtual router[uuid:%s, ip:%s] failed to configure dns%s for L3Network[uuid:%s, name:%s], %s",
                                     vr.getUuid(), vr.getManagementNic().getIp(), struct, l3.getUuid(), l3.getName(), ret.getError());
-                            logger.warn(err);
-                            completion.fail(errf.stringToOperationError(err));
+                            completion.fail(err);
                         }
                     }
                 });
@@ -224,6 +235,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
         for (String dns : struct.getDns()) {
             VirtualRouterCommands.DnsInfo i = new VirtualRouterCommands.DnsInfo();
             i.setDnsAddress(dns);
+            i.setNicMac(vr.getGuestNic().getMac());
             info.add(i);
         }
 
@@ -234,6 +246,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
         msg.setCheckStatus(true);
         msg.setPath(VirtualRouterConstant.VR_REMOVE_DNS_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setVmInstanceUuid(vr.getUuid());
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -242,7 +255,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                 if (!reply.isSuccess()) {
                     logger.warn(String.format("virtual router[name: %s, uuid: %s] failed to remove dns%s, because %s",
                             vr.getName(), vr.getUuid(), JSONObjectUtil.toJsonString(info), reply.getError()));
-                    //TODO: schedule job to clean up
+                    // TODO GC
                 } else {
                     VirtualRouterAsyncHttpCallReply re = reply.castReply();
                     RemoveDnsRsp ret = re.toResponse(RemoveDnsRsp.class);
@@ -252,7 +265,7 @@ public class VirtualRouterDnsBackend implements NetworkServiceDnsBackend {
                     } else {
                         logger.warn(String.format("virtual router[name: %s, uuid: %s] failed to remove dns%s, because %s",
                                 vr.getName(), vr.getUuid(), JSONObjectUtil.toJsonString(info), ret.getError()));
-                        //TODO: schedule job to clean up
+                        //TODO GC
                     }
                 }
 

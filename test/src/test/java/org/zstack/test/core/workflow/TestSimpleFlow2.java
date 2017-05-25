@@ -2,10 +2,11 @@ package org.zstack.test.core.workflow;
 
 import junit.framework.Assert;
 import org.junit.Test;
-import org.zstack.header.core.workflow.Flow;
-import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.core.workflow.SimpleFlowChain;
 import org.zstack.core.workflow.WorkFlowException;
+import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
+import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -28,42 +29,43 @@ public class TestSimpleFlow2 {
                 .then(new Flow() {
                     @Override
                     public void run(FlowTrigger chain, Map data) {
-                        count[0] ++;
+                        count[0]++;
                         chain.next();
                     }
 
                     @Override
-                    public void rollback(FlowTrigger chain, Map data) {
-                        count[0] --;
+                    public void rollback(FlowRollback chain, Map data) {
+                        count[0]--;
                         chain.rollback();
                     }
                 })
                 .then(new Flow() {
                     @Override
                     public void run(FlowTrigger chain, Map data) {
-                        count[0] ++;
+                        count[0]++;
                         chain.next();
                     }
 
                     @Override
-                    public void rollback(FlowTrigger chain, Map data) {
-                        count[0] --;
+                    public void rollback(FlowRollback chain, Map data) {
+                        count[0]--;
                         chain.rollback();
                     }
                 })
                 .then(new Flow() {
                     @Override
                     public void run(FlowTrigger chain, Map data) {
-                        chain.rollback();
+                        chain.fail(null);
                     }
 
                     @Override
-                    public void rollback(FlowTrigger chain, Map data) {
-                        count[0] --;
+                    public void rollback(FlowRollback chain, Map data) {
+                        count[0]--;
+                        chain.rollback();
                     }
                 })
                 .start();
 
-        Assert.assertEquals(0, count[0]);
+        Assert.assertEquals(-1, count[0]);
     }
 }

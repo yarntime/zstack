@@ -8,14 +8,13 @@ import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
-import org.zstack.header.apimediator.StopRoutingException;
 import org.zstack.header.console.APIRequestConsoleAccessMsg;
 import org.zstack.header.console.ConsoleConstants;
 import org.zstack.header.message.APIMessage;
-import org.zstack.header.vm.VmInstance;
 import org.zstack.header.vm.VmInstanceState;
 import org.zstack.header.vm.VmInstanceVO;
 import org.zstack.header.vm.VmInstanceVO_;
+import static org.zstack.core.Platform.operr;
 
 /**
  * Created with IntelliJ IDEA.
@@ -46,10 +45,8 @@ public class ConsoleApiInterceptor implements ApiMessageInterceptor {
         q.add(VmInstanceVO_.uuid, Op.EQ, msg.getVmInstanceUuid());
         VmInstanceState state = q.findValue();
         if (VmInstanceState.Running != state) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("Console is only available when the VM[uuid:%s] is Running, but the current state is %s", msg.getVmInstanceUuid(), state)
-            ));
+            throw new ApiMessageInterceptionException(operr("Console is only available when the VM[uuid:%s] is Running, but the current state is %s", msg.getVmInstanceUuid(), state));
         }
-        bus.makeTargetServiceIdByResourceUuid(msg, ConsoleConstants.SERVICE_ID, ((APIRequestConsoleAccessMsg) msg).getVmInstanceUuid());
+        bus.makeTargetServiceIdByResourceUuid(msg, ConsoleConstants.SERVICE_ID, msg.getVmInstanceUuid());
     }
 }

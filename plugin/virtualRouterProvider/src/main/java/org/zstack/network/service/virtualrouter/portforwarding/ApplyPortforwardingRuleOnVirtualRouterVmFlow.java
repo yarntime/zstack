@@ -3,11 +3,15 @@ package org.zstack.network.service.virtualrouter.portforwarding;
 import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.network.service.virtualrouter.*;
@@ -16,6 +20,8 @@ import org.zstack.network.service.virtualrouter.VirtualRouterCommands.RevokePort
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -27,11 +33,14 @@ public class ApplyPortforwardingRuleOnVirtualRouterVmFlow implements Flow {
     @Autowired
     protected VirtualRouterManager vrMgr;
     @Autowired
+    @Qualifier("VirtualRouterPortForwardingBackend")
     protected VirtualRouterPortForwardingBackend backend;
     @Autowired
     private CloudBus bus;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     private final static String VR_APPLY_PORT_FORWARDING_RULE_SUCCESS = "ApplyPortForwardingRuleSuccess";
 
@@ -46,6 +55,7 @@ public class ApplyPortforwardingRuleOnVirtualRouterVmFlow implements Flow {
         VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setPath(VirtualRouterConstant.VR_CREATE_PORT_FORWARDING);
         msg.setCheckStatus(true);
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
@@ -68,19 +78,17 @@ public class ApplyPortforwardingRuleOnVirtualRouterVmFlow implements Flow {
                     data.put(VR_APPLY_PORT_FORWARDING_RULE_SUCCESS, Boolean.TRUE);
                     chain.next();
                 } else {
-                    String err = String
-                            .format("failed to create port forwarding rule[vip ip: %s, private ip: %s, vip start port: %s, vip end port: %s, private start port: %s, private end port: %s], because %s",
-                                    to.getVipIp(), to.getPrivateIp(), to.getVipPortStart(), to.getVipPortEnd(),
-                                    to.getPrivatePortStart(), to.getPrivatePortEnd(), ret.getError());
-                    logger.warn(err);
-                    chain.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("failed to create port forwarding rule[vip ip: %s, private ip: %s, vip start port: %s, vip end port: %s, private start port: %s, private end port: %s], because %s",
+                            to.getVipIp(), to.getPrivateIp(), to.getVipPortStart(), to.getVipPortEnd(),
+                            to.getPrivatePortStart(), to.getPrivatePortEnd(), ret.getError());
+                    chain.fail(err);
                 }
             }
         });
     }
 
     @Override
-    public void rollback(final FlowTrigger chain, Map data) {
+    public void rollback(final FlowRollback chain, Map data) {
         if (data.get(VR_APPLY_PORT_FORWARDING_RULE_SUCCESS) != null) {
             final PortForwardingRuleTO to = (PortForwardingRuleTO) data.get(VirtualRouterConstant.VR_PORT_FORWARDING_RULE);
             final VirtualRouterVmInventory vr = (VirtualRouterVmInventory) data.get(VirtualRouterConstant.VR_RESULT_VM);
@@ -92,15 +100,16 @@ public class ApplyPortforwardingRuleOnVirtualRouterVmFlow implements Flow {
             msg.setCheckStatus(true);
             msg.setPath(VirtualRouterConstant.VR_REVOKE_PORT_FORWARDING);
             msg.setCommand(cmd);
+            msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
             msg.setVmInstanceUuid(vr.getUuid());
             bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
             bus.send(msg, new CloudBusCallBack(chain) {
                 @Override
                 public void run(MessageReply reply) {
                     if (!reply.isSuccess()) {
-                        String err = String.format("failed to revoke port forwarding rules %, because %s", JSONObjectUtil.toJsonString(to), reply.getError());
+                        String err = String.format("failed to revoke port forwarding rules %s, because %s", JSONObjectUtil.toJsonString(to), reply.getError());
                         logger.warn(err);
-                        //TODO: schedule a job to clean up
+                        //TODO GC
                     } else {
                         VirtualRouterAsyncHttpCallReply re = reply.castReply();
                         RevokePortForwardingRuleRsp ret = re.toResponse(RevokePortForwardingRuleRsp.class);
@@ -110,7 +119,7 @@ public class ApplyPortforwardingRuleOnVirtualRouterVmFlow implements Flow {
                         } else {
                             String err = String.format("failed to revoke port forwarding rules %, because %s", JSONObjectUtil.toJsonString(to), ret.getError());
                             logger.warn(err);
-                            //TODO: schedule a job to clean up
+                            //TODO GC
                         }
                     }
 

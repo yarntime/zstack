@@ -1,9 +1,9 @@
 package org.zstack.network.service.lb;
 
-import org.zstack.header.tag.AutoDeleteTag;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.NoView;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
@@ -15,14 +15,9 @@ import java.util.Set;
  */
 @Entity
 @Table
-@AutoDeleteTag
-public class LoadBalancerListenerVO {
-    @Id
+public class LoadBalancerListenerVO extends ResourceVO {
     @Column
-    private String uuid;
-
-    @Column
-    @ForeignKey(parentEntityClass = LoadBalancerVO.class, parentKey = "uuid", onDeleteAction = ReferenceOption.CASCADE)
+    @ForeignKey(parentEntityClass = LoadBalancerVO.class, parentKey = "uuid", onDeleteAction = ReferenceOption.RESTRICT)
     private String loadBalancerUuid;
 
     @Column
@@ -51,6 +46,11 @@ public class LoadBalancerListenerVO {
     @Column
     private Timestamp lastOpDate;
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
     public Set<LoadBalancerListenerVmNicRefVO> getVmNicRefs() {
         return vmNicRefs;
     }
@@ -73,14 +73,6 @@ public class LoadBalancerListenerVO {
 
     public void setDescription(String description) {
         this.description = description;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public int getInstancePort() {

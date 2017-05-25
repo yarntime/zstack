@@ -13,10 +13,7 @@ import org.zstack.header.message.MessageReply;
 import org.zstack.header.simulator.storage.primary.SimulatorPrimaryStorageDetails;
 import org.zstack.header.storage.primary.*;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
@@ -25,7 +22,7 @@ import org.zstack.utils.logging.CLogger;
  * 1. create a primary storage
  * 2. set primary storage to Disconnected
  * 3. try allocating primary storage
- *
+ * <p>
  * confirm failure
  */
 public class TestDefaultPrimaryStorageAllocatorStrategyFailure5 {
@@ -38,11 +35,18 @@ public class TestDefaultPrimaryStorageAllocatorStrategyFailure5 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
-        loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml")
-                .addXml("PrimaryStorageManager.xml").addXml("ZoneManager.xml")
-                .addXml("ClusterManager.xml").addXml("HostManager.xml").addXml("ConfigurationManager.xml").addXml("AccountManager.xml").build();
+        loader = con.addXml("PortalForUnitTest.xml")
+                .addXml("Simulator.xml")
+                .addXml("PrimaryStorageManager.xml")
+                .addXml("ZoneManager.xml")
+                .addXml("ClusterManager.xml")
+                .addXml("HostManager.xml")
+                .addXml("ConfigurationManager.xml")
+                .addXml("HostAllocatorManager.xml")
+                .addXml("AccountManager.xml")
+                .build();
         dbf = loader.getComponent(DatabaseFacade.class);
         bus = loader.getComponent(CloudBus.class);
         api = new Api();
@@ -72,7 +76,7 @@ public class TestDefaultPrimaryStorageAllocatorStrategyFailure5 {
         dbf.update(pvo);
 
         AllocatePrimaryStorageMsg msg = new AllocatePrimaryStorageMsg();
-        msg.setHostUuid(host.getUuid());
+        msg.setRequiredHostUuid(host.getUuid());
         msg.setSize(requiredSize);
         msg.setServiceId(bus.makeLocalServiceId(PrimaryStorageConstant.SERVICE_ID));
         MessageReply reply = bus.call(msg);

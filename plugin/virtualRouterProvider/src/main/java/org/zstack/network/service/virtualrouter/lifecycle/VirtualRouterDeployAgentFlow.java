@@ -6,13 +6,13 @@ import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.appliancevm.ApplianceVmConstant;
 import org.zstack.appliancevm.ApplianceVmSpec;
 import org.zstack.core.CoreGlobalProperty;
+import org.zstack.core.ansible.AnsibleFacade;
 import org.zstack.core.ansible.AnsibleGlobalProperty;
 import org.zstack.core.ansible.AnsibleRunner;
 import org.zstack.core.ansible.SshFileMd5Checker;
-import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.workflow.*;
-import org.zstack.header.configuration.ConfigurationConstant;
+import org.zstack.core.workflow.FlowChainBuilder;
+import org.zstack.core.workflow.ShareFlow;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
@@ -21,9 +21,9 @@ import org.zstack.header.rest.RESTFacade;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceSpec;
 import org.zstack.header.vm.VmNicInventory;
-import org.zstack.network.service.virtualrouter.*;
 import org.zstack.network.service.virtualrouter.VirtualRouterCommands.InitCommand;
 import org.zstack.network.service.virtualrouter.VirtualRouterCommands.InitRsp;
+import org.zstack.network.service.virtualrouter.*;
 import org.zstack.network.service.virtualrouter.VirtualRouterConstant.Param;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.DebugUtils;
@@ -32,6 +32,8 @@ import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.Map;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
@@ -39,7 +41,7 @@ public class VirtualRouterDeployAgentFlow extends NoRollbackFlow {
     private static final CLogger logger = Utils.getLogger(VirtualRouterDeployAgentFlow.class);
 
 	@Autowired
-	private GlobalConfigFacade gcf;
+	private AnsibleFacade asf;
 	@Autowired
 	private VirtualRouterManager vrMgr;
 	@Autowired
@@ -96,7 +98,7 @@ public class VirtualRouterDeployAgentFlow extends NoRollbackFlow {
                                 if (ret.isSuccess()) {
                                     trigger.next();
                                 } else {
-                                    trigger.fail(errf.stringToOperationError(ret.getError()));
+                                    trigger.fail(operr(ret.getError()));
                                 }
                             }
 
@@ -157,8 +159,7 @@ public class VirtualRouterDeployAgentFlow extends NoRollbackFlow {
         }
 
         final String username = "root";
-        final String privKey = gcf.getConfigValue(ConfigurationConstant.GlobalConfig.privateKey.getCategory(),
-                ConfigurationConstant.GlobalConfig.privateKey.toString(), String.class);
+        final String privKey = asf.getPrivateKey();
         final String mgmtIp = mgmtNic.getIp();
 
         SshFileMd5Checker checker = new SshFileMd5Checker();

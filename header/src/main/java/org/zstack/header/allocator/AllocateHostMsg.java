@@ -1,7 +1,6 @@
 package org.zstack.header.allocator;
 
 import org.zstack.header.configuration.DiskOfferingInventory;
-import org.zstack.header.configuration.InstanceOfferingInventory;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.message.NeedReplyMessage;
 import org.zstack.header.vm.VmInstanceInventory;
@@ -21,6 +20,42 @@ public class AllocateHostMsg extends NeedReplyMessage {
     private String vmOperation;
     private boolean isDryRun;
     private List<DiskOfferingInventory> diskOfferings;
+    private boolean allowNoL3Networks;
+    private boolean listAllHosts;
+    private String requiredBackupStorageUuid;
+    private String requiredPrimaryStorageUuid;
+
+    public String getRequiredPrimaryStorageUuid() {
+        return requiredPrimaryStorageUuid;
+    }
+
+    public void setRequiredPrimaryStorageUuid(String requiredPrimaryStorageUuid) {
+        this.requiredPrimaryStorageUuid = requiredPrimaryStorageUuid;
+    }
+
+    public String getRequiredBackupStorageUuid() {
+        return requiredBackupStorageUuid;
+    }
+
+    public void setRequiredBackupStorageUuid(String requiredBackupStorageUuid) {
+        this.requiredBackupStorageUuid = requiredBackupStorageUuid;
+    }
+
+    public boolean isListAllHosts() {
+        return listAllHosts;
+    }
+
+    public void setListAllHosts(boolean listAllHosts) {
+        this.listAllHosts = listAllHosts;
+    }
+
+    public boolean isAllowNoL3Networks() {
+        return allowNoL3Networks;
+    }
+
+    public void setAllowNoL3Networks(boolean allowNoL3Networks) {
+        this.allowNoL3Networks = allowNoL3Networks;
+    }
 
     public List<DiskOfferingInventory> getDiskOfferings() {
         return diskOfferings;
@@ -57,18 +92,23 @@ public class AllocateHostMsg extends NeedReplyMessage {
     public long getCpuCapacity() {
         return cpuCapacity;
     }
+
     public void setCpuCapacity(long cpuCapacity) {
         this.cpuCapacity = cpuCapacity;
     }
+
     public long getMemoryCapacity() {
         return memoryCapacity;
     }
+
     public void setMemoryCapacity(long memoryCapacity) {
         this.memoryCapacity = memoryCapacity;
     }
+
     public long getDiskSize() {
         return diskSize;
     }
+
     public void setDiskSize(long diskSize) {
         this.diskSize = diskSize;
     }
@@ -76,15 +116,18 @@ public class AllocateHostMsg extends NeedReplyMessage {
     public String getAllocatorStrategy() {
         return allocatorStrategy;
     }
+
     public void setAllocatorStrategy(String allocatorStrategy) {
         this.allocatorStrategy = allocatorStrategy;
     }
+
     public List<String> getAvoidHostUuids() {
         if (avoidHostUuids == null) {
             avoidHostUuids = new ArrayList<String>(0);
         }
         return avoidHostUuids;
     }
+
     public void setAvoidHostUuids(List<String> avoidHostUuids) {
         this.avoidHostUuids = avoidHostUuids;
     }
@@ -95,9 +138,11 @@ public class AllocateHostMsg extends NeedReplyMessage {
         }
         return l3NetworkUuids;
     }
+
     public void setL3NetworkUuids(List<String> l3NetworkUuids) {
         this.l3NetworkUuids = l3NetworkUuids;
     }
+
     public VmInstanceInventory getVmInstance() {
         return vmInstance;
     }

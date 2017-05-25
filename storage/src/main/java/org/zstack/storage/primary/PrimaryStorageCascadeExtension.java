@@ -54,16 +54,17 @@ public class PrimaryStorageCascadeExtension extends AbstractAsyncCascadeExtensio
 
     private void handlePrimaryStorageDetach(CascadeAction action, final Completion completion) {
         List<PrimaryStorageDetachStruct> structs = action.getParentIssuerContext();
-        List<DetachPrimaryStorageFromClusterMsg> msgs = CollectionUtils.transformToList(structs, new Function<DetachPrimaryStorageFromClusterMsg, PrimaryStorageDetachStruct>() {
-            @Override
-            public DetachPrimaryStorageFromClusterMsg call(PrimaryStorageDetachStruct arg) {
-                DetachPrimaryStorageFromClusterMsg msg = new DetachPrimaryStorageFromClusterMsg();
-                msg.setPrimaryStorageUuid(arg.getPrimaryStorageUuid());
-                msg.setClusterUuid(arg.getClusterUuid());
-                bus.makeTargetServiceIdByResourceUuid(msg, PrimaryStorageConstant.SERVICE_ID, arg.getPrimaryStorageUuid());
-                return msg;
-            }
-        });
+        List<DetachPrimaryStorageFromClusterMsg> msgs = CollectionUtils.transformToList(structs,
+                new Function<DetachPrimaryStorageFromClusterMsg, PrimaryStorageDetachStruct>() {
+                    @Override
+                    public DetachPrimaryStorageFromClusterMsg call(PrimaryStorageDetachStruct arg) {
+                        DetachPrimaryStorageFromClusterMsg msg = new DetachPrimaryStorageFromClusterMsg();
+                        msg.setPrimaryStorageUuid(arg.getPrimaryStorageUuid());
+                        msg.setClusterUuid(arg.getClusterUuid());
+                        bus.makeTargetServiceIdByResourceUuid(msg, PrimaryStorageConstant.SERVICE_ID, arg.getPrimaryStorageUuid());
+                        return msg;
+                    }
+                });
 
         bus.send(msgs, 1, new CloudBusListCallBack(completion) {
             @Override
@@ -92,7 +93,7 @@ public class PrimaryStorageCascadeExtension extends AbstractAsyncCascadeExtensio
             return;
         }
 
-        List<PrimaryStorageDeletionMsg> msgs = new ArrayList<PrimaryStorageDeletionMsg>();
+        List<PrimaryStorageDeletionMsg> msgs = new ArrayList<>();
         for (PrimaryStorageInventory prinv : prinvs) {
             PrimaryStorageDeletionMsg msg = new PrimaryStorageDeletionMsg();
             msg.setPrimaryStorageUuid(prinv.getUuid());
@@ -113,7 +114,7 @@ public class PrimaryStorageCascadeExtension extends AbstractAsyncCascadeExtensio
                     }
                 }
 
-                List<String> uuids = new ArrayList<String>();
+                List<String> uuids = new ArrayList<>();
                 for (MessageReply r : replies) {
                     PrimaryStorageInventory inv = prinvs.get(replies.indexOf(r));
                     uuids.add(inv.getUuid());
@@ -157,12 +158,13 @@ public class PrimaryStorageCascadeExtension extends AbstractAsyncCascadeExtensio
     private List<PrimaryStorageInventory> primaryStorageInventories(CascadeAction action) {
         List<PrimaryStorageInventory> ret = null;
         if (ZoneVO.class.getSimpleName().equals(action.getParentIssuer())) {
-            List<String> zuuids = CollectionUtils.transformToList((List<ZoneInventory>)action.getParentIssuerContext(), new Function<String, ZoneInventory>() {
-                @Override
-                public String call(ZoneInventory arg) {
-                    return arg.getUuid();
-                }
-            });
+            List<String> zuuids = CollectionUtils.transformToList(
+                    (List<ZoneInventory>) action.getParentIssuerContext(), new Function<String, ZoneInventory>() {
+                        @Override
+                        public String call(ZoneInventory arg) {
+                            return arg.getUuid();
+                        }
+                    });
 
             SimpleQuery<PrimaryStorageVO> q = dbf.createQuery(PrimaryStorageVO.class);
             q.add(PrimaryStorageVO_.zoneUuid, SimpleQuery.Op.IN, zuuids);

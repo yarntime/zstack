@@ -1,10 +1,17 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 import java.util.List;
+
+import static java.util.Arrays.asList;
+
 /**
  * @api
  * api event for :ref:`APIDeleteSecurityGroupRuleEvent`
@@ -46,6 +53,11 @@ import java.util.List;
  * see :ref:`APIDeleteSecurityGroupRuleEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/rules",
+        method = HttpMethod.DELETE,
+        responseClass = APIDeleteSecurityGroupRuleEvent.class
+)
 public class APIDeleteSecurityGroupRuleMsg extends APIMessage {
     /**
      * @desc a list of rule uuid
@@ -60,4 +72,29 @@ public class APIDeleteSecurityGroupRuleMsg extends APIMessage {
     public void setRuleUuids(List<String> ruleUuids) {
         this.ruleUuids = ruleUuids;
     }
+ 
+    public static APIDeleteSecurityGroupRuleMsg __example__() {
+        APIDeleteSecurityGroupRuleMsg msg = new APIDeleteSecurityGroupRuleMsg();
+        msg.setRuleUuids(asList(uuid()));
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+        StringBuilder str = new StringBuilder();
+        for (String s:ruleUuids){
+            str.append(String.format("ruleUuid:%s ",s));
+        }
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Deleted").resource(str.toString(),SecurityGroupRuleVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

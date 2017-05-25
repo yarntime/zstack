@@ -6,10 +6,10 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.apimediator.StopRoutingException;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.image.*;
 import org.zstack.header.image.ImageConstant.ImageMediaType;
 import org.zstack.header.message.APIMessage;
@@ -24,6 +24,9 @@ import org.zstack.header.volume.VolumeFormat;
 import org.zstack.header.volume.VolumeState;
 import org.zstack.header.volume.VolumeStatus;
 import org.zstack.header.volume.VolumeVO;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import java.util.List;
 
@@ -52,8 +55,6 @@ public class ImageApiInterceptor implements ApiMessageInterceptor {
     public APIMessage intercept(APIMessage msg) throws ApiMessageInterceptionException {
         if (msg instanceof APIAddImageMsg) {
             validate((APIAddImageMsg)msg);
-        } else if (msg instanceof APIDeleteImageMsg) {
-            validate((APIDeleteImageMsg)msg);
         } else if (msg instanceof APICreateRootVolumeTemplateFromRootVolumeMsg) {
             validate((APICreateRootVolumeTemplateFromRootVolumeMsg) msg);
         } else if (msg instanceof APICreateRootVolumeTemplateFromVolumeSnapshotMsg) {
@@ -69,15 +70,11 @@ public class ImageApiInterceptor implements ApiMessageInterceptor {
     private void validate(APICreateDataVolumeTemplateFromVolumeMsg msg) {
         VolumeVO vol = dbf.findByUuid(msg.getVolumeUuid(), VolumeVO.class);
         if (VolumeStatus.Ready != vol.getStatus()) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("volume[uuid:%s] is not Ready, it's %s", vol.getUuid(), vol.getStatus())
-            ));
+            throw new ApiMessageInterceptionException(operr("volume[uuid:%s] is not Ready, it's %s", vol.getUuid(), vol.getStatus()));
         }
 
         if (VolumeState.Enabled != vol.getState()) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("volume[uuid:%s] is not Enabled, it's %s", vol.getUuid(), vol.getState())
-            ));
+            throw new ApiMessageInterceptionException(operr("volume[uuid:%s] is not Enabled, it's %s", vol.getUuid(), vol.getState()));
         }
 
         if (vol.getVmInstanceUuid() != null) {
@@ -86,10 +83,8 @@ public class ImageApiInterceptor implements ApiMessageInterceptor {
             q.add(VmInstanceVO_.uuid, Op.EQ, vol.getVmInstanceUuid());
             VmInstanceState state = q.findValue();
             if (VmInstanceState.Stopped != state) {
-                throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                        String.format("volume[uuid:%s] is attached to vm[uuid:%s]; the vm is not Stopped, it's %s",
-                                vol.getUuid(), vol.getVmInstanceUuid(), state)
-                ));
+                throw new ApiMessageInterceptionException(operr("volume[uuid:%s] is attached to vm[uuid:%s]; the vm is not Stopped, it's %s",
+                                vol.getUuid(), vol.getVmInstanceUuid(), state));
             }
         }
 
@@ -108,29 +103,23 @@ public class ImageApiInterceptor implements ApiMessageInterceptor {
         }
     }
 
-    private void validate(APIDeleteImageMsg msg) {
-        if (!dbf.isExist(msg.getUuid(), ImageVO.class)) {
-            APIDeleteImageEvent evt = new APIDeleteImageEvent(msg.getId());
-            bus.publish(evt);
-            throw new StopRoutingException();
-        }
-    }
-
     private void validate(APIAddImageMsg msg) {
         if (ImageMediaType.ISO.toString().equals(msg.getMediaType())) {
             msg.setFormat(ImageConstant.ISO_FORMAT_STRING);
         }
 
-        if (!VolumeFormat.hasType(msg.getFormat())) {
-            throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                    String.format("unknown format[%s]", msg.getFormat())
+        if (msg.isSystem() && (ImageMediaType.ISO.toString().equals(msg.getMediaType()) || ImageConstant.ISO_FORMAT_STRING.equals(msg.getFormat()))) {
+            throw new ApiMessageInterceptionException(argerr(
+                    "ISO cannot be used as system image"
             ));
         }
 
+        if (!VolumeFormat.hasType(msg.getFormat())) {
+            throw new ApiMessageInterceptionException(argerr("unknown format[%s]", msg.getFormat()));
+        }
+
         if (msg.getType() != null && !ImageType.hasType(msg.getType())) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("unsupported image type[%s]", msg.getType())
-            ));
+            throw new ApiMessageInterceptionException(argerr("unsupported image type[%s]", msg.getType()));
         }
 
         if (msg.getMediaType() == null) {
@@ -149,10 +138,8 @@ public class ImageApiInterceptor implements ApiMessageInterceptor {
             q.add(BackupStorageVO_.uuid, Op.IN, msg.getBackupStorageUuids());
             List<String> bsUuids = q.listValue();
             if (bsUuids.isEmpty()) {
-                throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                        String.format("no backup storage specified in uuids%s is available for adding this image; they are not in status %s or not in state %s, or the uuid is invalid backup storage uuid",
-                                msg.getBackupStorageUuids(), BackupStorageStatus.Connected, BackupStorageState.Enabled)
-                ));
+                throw new ApiMessageInterceptionException(operr("no backup storage specified in uuids%s is available for adding this image; they are not in status %s or not in state %s, or the uuid is invalid backup storage uuid",
+                                msg.getBackupStorageUuids(), BackupStorageStatus.Connected, BackupStorageState.Enabled));
             }
             msg.setBackupStorageUuids(bsUuids);
         }

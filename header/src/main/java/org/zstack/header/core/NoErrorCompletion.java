@@ -7,12 +7,8 @@ package org.zstack.header.core;
  * To change this template use File | Settings | File Templates.
  */
 public abstract class NoErrorCompletion extends AbstractCompletion {
-    public NoErrorCompletion(AsyncBackup...completion) {
-        super(completion);
-    }
-
-    public NoErrorCompletion() {
-        super();
+    public NoErrorCompletion(AsyncBackup... completion) {
+        super(null, completion);
     }
 
     public abstract void done();

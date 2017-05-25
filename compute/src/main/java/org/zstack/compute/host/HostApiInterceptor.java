@@ -3,14 +3,19 @@ package org.zstack.compute.host;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.Q;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.header.apimediator.StopRoutingException;
 import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.host.*;
 import org.zstack.header.message.APIMessage;
+import org.zstack.utils.network.NetworkUtils;
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 /**
  * Created with IntelliJ IDEA.
@@ -39,17 +44,76 @@ public class HostApiInterceptor implements ApiMessageInterceptor {
 
         if (msg instanceof APIAddHostMsg) {
             validate((APIAddHostMsg) msg);
+        } else if (msg instanceof APIUpdateHostMsg) {
+            validate((APIUpdateHostMsg) msg);
+        } else if (msg instanceof APIDeleteHostMsg) {
+            validate((APIDeleteHostMsg) msg);
+        } else if (msg instanceof APIChangeHostStateMsg){
+            validate((APIChangeHostStateMsg) msg);
+        } else if (msg instanceof APIReconnectHostMsg){
+            validate((APIReconnectHostMsg) msg);
         }
+
         return msg;
     }
 
+    private void validate(APIDeleteHostMsg msg) {
+        if (!dbf.isExist(msg.getUuid(), HostVO.class)) {
+            APIDeleteHostEvent evt = new APIDeleteHostEvent(msg.getId());
+            bus.publish(evt);
+            throw new StopRoutingException();
+        }
+    }
+
+    private void validate(APIUpdateHostMsg msg) {
+        if (msg.getManagementIp() != null) {
+            SimpleQuery<HostVO> q = dbf.createQuery(HostVO.class);
+            q.add(HostVO_.managementIp, Op.EQ, msg.getManagementIp());
+            if (q.isExists()) {
+                throw new ApiMessageInterceptionException(argerr("there has been a host having managementIp[%s]", msg.getManagementIp()));
+            }
+        }
+
+        HostStatus hostStatus = Q.New(HostVO.class)
+                .select(HostVO_.status)
+                .eq(HostVO_.uuid,msg.getHostUuid())
+                .findValue();
+        if (hostStatus == HostStatus.Connecting){
+            throw new ApiMessageInterceptionException(
+                    operr("can not update host[uuid:%s]which is connecting or creating, please wait.", msg.getHostUuid()));
+        }
+    }
+
+    private void validate(APIReconnectHostMsg msg) {
+        HostStatus hostStatus = Q.New(HostVO.class)
+                .select(HostVO_.status)
+                .eq(HostVO_.uuid,msg.getHostUuid())
+                .findValue();
+        if (hostStatus == HostStatus.Connecting){
+            throw new ApiMessageInterceptionException(
+                    operr("can not reconnect host[uuid:%s]which is connecting or creating, please wait", msg.getHostUuid()));
+        }
+    }
+
     private void validate(APIAddHostMsg msg) {
+        if (!NetworkUtils.isIpv4Address(msg.getManagementIp()) && !NetworkUtils.isHostname(msg.getManagementIp())) {
+            throw new ApiMessageInterceptionException(argerr("managementIp[%s] is neither an IPv4 address nor a valid hostname", msg.getManagementIp()));
+        }
+
         SimpleQuery<HostVO> q = dbf.createQuery(HostVO.class);
         q.add(HostVO_.managementIp, Op.EQ, msg.getManagementIp());
         if (q.isExists()) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("there has been a host having managementIp[%s]", msg.getManagementIp())
-            ));
+            throw new ApiMessageInterceptionException(argerr("there has been a host having managementIp[%s]", msg.getManagementIp()));
+        }
+    }
+
+    private void validate(APIChangeHostStateMsg msg){
+        HostStatus hostStatus = Q.New(HostVO.class)
+                .select(HostVO_.status)
+                .eq(HostVO_.uuid,msg.getHostUuid())
+                .findValue();
+        if (hostStatus == HostStatus.Connecting && msg.getStateEvent().equals(HostStateEvent.maintain.toString())){
+            throw new ApiMessageInterceptionException(operr("can not maintain host[uuid:%s]which is connecting", msg.getHostUuid()));
         }
     }
 }

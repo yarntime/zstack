@@ -7,10 +7,7 @@ import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.configuration.*;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.test.image.TestAddImage;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
@@ -25,7 +22,7 @@ public class TestChangeInstanceOfferingState {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml")
                 .addXml("ConfigurationManager.xml").addXml("HostAllocatorManager.xml").addXml("AccountManager.xml").build();
@@ -48,7 +45,7 @@ public class TestChangeInstanceOfferingState {
         inv.setMemorySize(SizeUnit.GIGABYTE.toByte(1));
         inv.setDescription("TestInstanceOffering");
         inv = api.addInstanceOffering(inv);
-        
+
         InstanceOfferingVO vo = dbf.findByUuid(inv.getUuid(), InstanceOfferingVO.class);
         Assert.assertNotNull(vo);
         Assert.assertEquals(InstanceOfferingDuration.Permanent, vo.getDuration());

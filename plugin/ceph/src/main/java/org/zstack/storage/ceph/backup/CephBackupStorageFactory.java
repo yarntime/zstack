@@ -10,9 +10,11 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.Component;
 import org.zstack.header.storage.backup.*;
 import org.zstack.storage.ceph.*;
+import org.zstack.tag.SystemTagCreator;
 
 import javax.persistence.LockModeType;
 import javax.persistence.TypedQuery;
+import java.util.List;
 
 /**
  * Created by frank on 7/27/2015.
@@ -24,6 +26,24 @@ public class CephBackupStorageFactory implements BackupStorageFactory, CephCapac
     private AnsibleFacade asf;
 
     public static final BackupStorageType type = new BackupStorageType(CephConstants.CEPH_BACKUP_STORAGE_TYPE);
+
+    static {
+        type.setOrder(899);
+    }
+
+    void init() {
+        type.setPrimaryStorageFinder(new BackupStorageFindRelatedPrimaryStorage() {
+            @Override
+            @Transactional(readOnly = true)
+            public List<String> findRelatedPrimaryStorage(String backupStorageUuid) {
+                String sql = "select p.uuid from CephPrimaryStorageVO p, CephBackupStorageVO b where b.fsid = p.fsid" +
+                        " and b.uuid = :buuid";
+                TypedQuery<String> q = dbf.getEntityManager().createQuery(sql, String.class);
+                q.setParameter("buuid", backupStorageUuid);
+                return q.getResultList();
+            }
+        });
+    }
 
     @Override
     public BackupStorageType getBackupStorageType() {
@@ -43,7 +63,9 @@ public class CephBackupStorageFactory implements BackupStorageFactory, CephCapac
         dbf.getEntityManager().persist(cvo);
 
         if (cmsg.getPoolName() != null) {
-            CephSystemTags.PREDEFINED_BACKUP_STORAGE_POOL.createInherentTag(cvo.getUuid());
+            SystemTagCreator creator = CephSystemTags.PREDEFINED_BACKUP_STORAGE_POOL.newSystemTagCreator(cvo.getUuid());
+            creator.ignoreIfExisting = true;
+            creator.create();
         }
 
         for (String url : cmsg.getMonUrls()) {
@@ -52,6 +74,7 @@ public class CephBackupStorageFactory implements BackupStorageFactory, CephCapac
             monvo.setUuid(Platform.getUuid());
             monvo.setStatus(MonStatus.Connecting);
             monvo.setHostname(uri.getHostname());
+            monvo.setMonAddr(monvo.getHostname());
             monvo.setMonPort(uri.getMonPort());
             monvo.setSshPort(uri.getSshPort());
             monvo.setSshUsername(uri.getSshUsername());

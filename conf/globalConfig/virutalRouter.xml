@@ -35,4 +35,23 @@
         <category>virtualRouter</category>
         <type>java.lang.Integer</type>
     </config>
+    <config>
+        <name>ssh.username</name>
+        <description>The username to ssh login the virtual router</description>
+        <defaultValue>vyos</defaultValue>
+        <category>virtualRouter</category>
+    </config>
+    <config>
+        <name>ssh.port</name>
+        <description>The ssh port of the virtual router</description>
+        <defaultValue>22</defaultValue>
+        <category>virtualRouter</category>
+        <type>java.lang.Integer</type>
+    </config>
+    <config>
+        <name>vrouter.password</name>
+        <description>The password for vrouter vm</description>
+        <defaultValue>vrouter12#</defaultValue>
+        <category>virtualRouter</category>
+    </config>
 </globalConfig>

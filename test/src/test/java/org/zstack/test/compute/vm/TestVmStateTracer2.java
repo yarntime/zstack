@@ -6,15 +6,12 @@ import org.junit.Test;
 import org.zstack.compute.host.HostGlobalConfig;
 import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
-import org.zstack.core.cloudbus.CloudBusEventListener;
 import org.zstack.core.cloudbus.EventCallback;
 import org.zstack.core.cloudbus.EventFacade;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.host.HostInventory;
-import org.zstack.header.message.Event;
-import org.zstack.header.vm.StrangerVmFoundEvent;
 import org.zstack.header.vm.VmInstanceState;
 import org.zstack.header.vm.VmTracerCanonicalEvents;
 import org.zstack.header.vm.VmTracerCanonicalEvents.StrangerVmFoundData;
@@ -27,6 +24,12 @@ import org.zstack.test.deployer.Deployer;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 1. create a stranger vm
+ * <p>
+ * confirm the stranger vm event is fired
+ */
+@Deprecated
 public class TestVmStateTracer2 {
     Deployer deployer;
     Api api;
@@ -55,9 +58,9 @@ public class TestVmStateTracer2 {
         deployer.build();
         api = deployer.getApi();
     }
-    
+
     @Test
-    public void test() throws InterruptedException,ApiSenderException {
+    public void test() throws InterruptedException, ApiSenderException {
         strangerVmUuid = Platform.getUuid();
         HostInventory hinv = api.listHosts(null).get(0);
         hostUuidStrangerVmOn = hinv.getUuid();

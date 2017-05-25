@@ -3,7 +3,6 @@ package org.zstack.test.aop;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.errorcode.ErrorCode;
@@ -30,7 +29,7 @@ public class TestAsyncSafe2 {
 
     @Test
     public void test() {
-        throwError(new Completion() {
+        throwError(new Completion(null) {
             @Override
             public void success() {
             }
@@ -40,7 +39,7 @@ public class TestAsyncSafe2 {
                 logger.debug(errorCode.toString());
                 called1 = true;
             }
-        }, new ReturnValueCompletion() {
+        }, new ReturnValueCompletion(null) {
             @Override
             public void fail(ErrorCode errorCode) {
                 logger.debug(errorCode.toString());

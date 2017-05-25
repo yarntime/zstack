@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- *
  * start 2 nodes, send silent message to the node0 which won't reply
  * stop node0, we should receive error message which indicates node0 is unavailable
  */
@@ -75,7 +74,7 @@ public class TestMultipleNode5 {
 
             NeedReplySilentMsg smsg = new NeedReplySilentMsg();
             bus.makeServiceIdByManagementNodeId(smsg, SilentService.SERVICE_ID, target.getUuid());
-            bus.send(smsg, new CloudBusCallBack() {
+            bus.send(smsg, new CloudBusCallBack(null) {
                 @Override
                 public void run(MessageReply reply) {
                     if (!reply.isSuccess() && reply.getError().getCode().equals(SysErrors.MANAGEMENT_NODE_UNAVAILABLE_ERROR.toString())) {
@@ -92,9 +91,9 @@ public class TestMultipleNode5 {
                 @Override
                 public boolean handleEvent(Event e) {
                     if (e instanceof APIEvent) {
-                        APIEvent evt = (APIEvent)e;
+                        APIEvent evt = (APIEvent) e;
                         if (evt.getApiId().equals(amsg.getId()) &&
-                            !evt.isSuccess() && evt.getErrorCode().getCode().equals(SysErrors.MANAGEMENT_NODE_UNAVAILABLE_ERROR.toString())) {
+                                !evt.isSuccess() && evt.getError().getCode().equals(SysErrors.MANAGEMENT_NODE_UNAVAILABLE_ERROR.toString())) {
                             success2 = true;
                         }
                     }

@@ -5,26 +5,33 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.cascade.CascadeConstant;
 import org.zstack.core.cascade.CascadeFacade;
-import org.zstack.core.cloudbus.CloudBus;
-import org.zstack.core.cloudbus.CloudBusCallBack;
-import org.zstack.core.cloudbus.CloudBusListCallBack;
+import org.zstack.core.cloudbus.*;
+import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.Q;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.core.NopeCompletion;
-import org.zstack.header.core.workflow.*;
-import org.zstack.header.errorcode.OperationFailureException;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.core.thread.ChainTask;
 import org.zstack.core.thread.SyncTaskChain;
 import org.zstack.core.thread.ThreadFacade;
-import org.zstack.core.workflow.*;
+import org.zstack.core.workflow.FlowChainBuilder;
+import org.zstack.core.workflow.ShareFlow;
+import org.zstack.header.allocator.HostAllocatorConstant;
+import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
+import org.zstack.header.core.NopeCompletion;
+import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.OperationFailureException;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.host.*;
+import org.zstack.header.host.HostCanonicalEvents.HostDeletedData;
+import org.zstack.header.host.HostCanonicalEvents.HostStatusChangedData;
+import org.zstack.header.host.HostErrors.Opaque;
+import org.zstack.header.host.HostMaintenancePolicyExtensionPoint.HostMaintenancePolicy;
 import org.zstack.header.message.APIDeleteMessage;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
@@ -33,6 +40,7 @@ import org.zstack.header.vm.*;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.function.ForEachFunction;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
@@ -40,54 +48,61 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static org.zstack.core.Platform.operr;
+
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public abstract class HostBase extends AbstractHost {
-	protected static final CLogger logger = Utils.getLogger(HostBase.class);
-	protected HostVO self;
+    protected static final CLogger logger = Utils.getLogger(HostBase.class);
+    protected HostVO self;
 
-	@Autowired
-	protected CloudBus bus;
-	@Autowired
-	protected DatabaseFacade dbf;
-	@Autowired
-	protected ThreadFacade thdf;
-	@Autowired
-	protected HostExtensionPointEmitter extpEmitter;
-	@Autowired
-	protected GlobalConfigFacade gcf;
-	@Autowired
-	protected HostManager hostMgr;
-	@Autowired
-	protected HostNotifyPointEmitter notifyEmitter;
+    @Autowired
+    protected CloudBus bus;
+    @Autowired
+    protected DatabaseFacade dbf;
+    @Autowired
+    protected ThreadFacade thdf;
+    @Autowired
+    protected HostExtensionPointEmitter extpEmitter;
+    @Autowired
+    protected GlobalConfigFacade gcf;
+    @Autowired
+    protected HostManager hostMgr;
     @Autowired
     protected CascadeFacade casf;
     @Autowired
     protected ErrorFacade errf;
     @Autowired
     protected HostTracker tracker;
+    @Autowired
+    protected PluginRegistry pluginRgty;
+    @Autowired
+    protected EventFacade evtf;
 
-	protected final String id;
+    protected final String id;
 
     protected abstract void pingHook(Completion completion);
-    protected abstract int getVmMigrateQuantity();
-    protected abstract void changeStateHook(HostState current, HostStateEvent stateEvent, HostState next);
-    protected abstract void connectHook(ConnectHostInfo info, Completion complete);
-    protected abstract void executeHostMessageHandlerHook(HostMessageHandlerExtensionPoint ext, Message msg);
 
-	protected HostBase(HostVO self) {
-		this.self = self;
-		id = "Host-" + self.getUuid();
-	}
+    protected abstract int getVmMigrateQuantity();
+
+    protected abstract void changeStateHook(HostState current, HostStateEvent stateEvent, HostState next);
+
+    protected abstract void connectHook(ConnectHostInfo info, Completion complete);
+
+    protected HostBase(HostVO self) {
+        this.self = self;
+        id = "Host-" + self.getUuid();
+    }
 
     protected void checkStatus() {
         if (HostStatus.Connected != self.getStatus()) {
-            throw new OperationFailureException(errf.stringToOperationError(String.format("host[uuid:%s, name:%s] is in status[%s], cannot perform required operation", self.getUuid(), self.getName(), self.getStatus())));
+            ErrorCode cause = errf.instantiateErrorCode(HostErrors.HOST_IS_DISCONNECTED, String.format("host[uuid:%s, name:%s] is in status[%s], cannot perform required operation", self.getUuid(), self.getName(), self.getStatus()));
+            throw new OperationFailureException(errf.instantiateErrorCode(HostErrors.OPERATION_FAILURE_GC_ELIGIBLE, "unable to do the operation because the host is in status of Disconnected", cause));
         }
     }
 
     protected void checkState() {
         if (HostState.PreMaintenance == self.getState() || HostState.Maintenance == self.getState()) {
-            throw new OperationFailureException(errf.stringToOperationError(String.format("host[uuid:%s, name:%s] is in state[%s], cannot perform required operation", self.getUuid(), self.getName(), self.getState())));
+            throw new OperationFailureException(operr("host[uuid:%s, name:%s] is in state[%s], cannot perform required operation", self.getUuid(), self.getName(), self.getState()));
         }
     }
 
@@ -124,6 +139,10 @@ public abstract class HostBase extends AbstractHost {
             self.setDescription(msg.getDescription());
             update = true;
         }
+        if (msg.getManagementIp() != null) {
+            self.setManagementIp(msg.getManagementIp());
+            update = true;
+        }
 
         return update ? self : null;
     }
@@ -142,65 +161,96 @@ public abstract class HostBase extends AbstractHost {
         FlowChain chain = FlowChainBuilder.newShareFlowChain();
         chain.setName(String.format("maintenance-mode-host-%s-ip-%s", self.getUuid(), self.getManagementIp()));
 
+        HostMaintenancePolicy policy = HostMaintenancePolicy.MigrateVm;
+        for (HostMaintenancePolicyExtensionPoint ext : pluginRgty.getExtensionList(HostMaintenancePolicyExtensionPoint.class)) {
+            HostMaintenancePolicy p = ext.getHostMaintenancePolicy(getSelfInventory());
+            if (p != null) {
+                policy = p;
+                logger.debug(String.format("HostMaintenancePolicyExtensionPoint[%s] set maintenance policy for host[uuid:%s] to %s",
+                        ext.getClass(), self.getUuid(), policy));
+            }
+        }
+
         final int quantity = getVmMigrateQuantity();
-        DebugUtils.Assert(quantity!=0, String.format("getVmMigrateQuantity() cannot return 0"));
+        DebugUtils.Assert(quantity != 0, "getVmMigrateQuantity() cannot return 0");
+        final HostMaintenancePolicy finalPolicy = policy;
         chain.then(new ShareFlow() {
             List<String> vmFailedToMigrate = new ArrayList<String>();
 
             @Override
             public void setup() {
-                flow(new NoRollbackFlow() {
-                    String __name__ = "try-migrate-vm";
+                if (finalPolicy == HostMaintenancePolicy.MigrateVm) {
+                    flow(new NoRollbackFlow() {
+                        String __name__ = "try-migrate-vm";
 
-                    @Override
-                    public void run(final FlowTrigger trigger, Map data) {
-                        SimpleQuery<VmInstanceVO> q = dbf.createQuery(VmInstanceVO.class);
-                        q.select(VmInstanceVO_.uuid);
-                        q.add(VmInstanceVO_.hostUuid, SimpleQuery.Op.EQ, self.getUuid());
-                        q.add(VmInstanceVO_.state, Op.NOT_EQ, VmInstanceState.Unknown);
-                        List<String> vmUuids = q.listValue();
+                        @Override
+                        public void run(final FlowTrigger trigger, Map data) {
+                            SimpleQuery<VmInstanceVO> q = dbf.createQuery(VmInstanceVO.class);
+                            q.select(VmInstanceVO_.uuid);
+                            q.add(VmInstanceVO_.hostUuid, Op.EQ, self.getUuid());
+                            q.add(VmInstanceVO_.state, Op.NOT_EQ, VmInstanceState.Unknown);
+                            List<String> vmUuids = q.listValue();
 
-                        if (vmUuids.isEmpty()) {
-                            trigger.next();
-                            return;
-                        }
-
-                        final List<MigrateVmMsg> msgs = new ArrayList<MigrateVmMsg>();
-                        for (String uuid : vmUuids) {
-                            MigrateVmMsg msg = new MigrateVmMsg();
-                            msg.setVmInstanceUuid(uuid);
-                            bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, uuid);
-                            msgs.add(msg);
-                        }
-
-                        bus.send(msgs, quantity, new CloudBusListCallBack(trigger) {
-                            @Override
-                            public void run(List<MessageReply> replies) {
-                                for (MessageReply reply : replies) {
-                                    if (!reply.isSuccess()) {
-                                        MigrateVmMsg msg = msgs.get(replies.indexOf(reply));
-                                        logger.warn(String.format("failed to migrate vm[uuid:%s] on host[uuid:%s, name:%s, ip:%s], will try stopping it. %s",
-                                                msg.getVmInstanceUuid(), self.getUuid(), self.getName(), self.getManagementIp(), reply.getError()));
-                                        vmFailedToMigrate.add(msg.getVmInstanceUuid());
-                                    }
-                                }
-
+                            if (vmUuids.isEmpty()) {
                                 trigger.next();
+                                return;
                             }
-                        });
-                    }
-                });
+
+                            int migrateQuantity = quantity;
+                            HostInventory host = getSelfInventory();
+                            for (OrderVmBeforeMigrationDuringHostMaintenanceExtensionPoint ext : pluginRgty.getExtensionList(OrderVmBeforeMigrationDuringHostMaintenanceExtensionPoint.class)) {
+                                List<String> ordered = ext.orderVmBeforeMigrationDuringHostMaintenance(host, vmUuids);
+                                if (ordered != null) {
+                                    vmUuids = ordered;
+
+                                    logger.debug(String.format("%s ordered VMs for host maintenance, to keep the order, we will migrate VMs one by one",
+                                            ext.getClass()));
+                                    migrateQuantity = 1;
+                                }
+                            }
+
+                            final List<MigrateVmMsg> msgs = new ArrayList<MigrateVmMsg>();
+                            for (String uuid : vmUuids) {
+                                MigrateVmMsg msg = new MigrateVmMsg();
+                                msg.setVmInstanceUuid(uuid);
+                                bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, uuid);
+                                msgs.add(msg);
+                            }
+
+                            bus.send(msgs, migrateQuantity, new CloudBusListCallBack(trigger) {
+                                @Override
+                                public void run(List<MessageReply> replies) {
+                                    for (MessageReply reply : replies) {
+                                        if (!reply.isSuccess()) {
+                                            MigrateVmMsg msg = msgs.get(replies.indexOf(reply));
+                                            logger.warn(String.format("failed to migrate vm[uuid:%s] on host[uuid:%s, name:%s, ip:%s], will try stopping it. %s",
+                                                    msg.getVmInstanceUuid(), self.getUuid(), self.getName(), self.getManagementIp(), reply.getError()));
+                                            vmFailedToMigrate.add(msg.getVmInstanceUuid());
+                                        }
+                                    }
+
+                                    trigger.next();
+                                }
+                            });
+                        }
+                    });
+                } else {
+                    // the policy is not to migrate vm
+                    // put all vms in vmFailedToMigrate so the next flow will stop all of them
+                    SimpleQuery<VmInstanceVO> q = dbf.createQuery(VmInstanceVO.class);
+                    q.select(VmInstanceVO_.uuid);
+                    q.add(VmInstanceVO_.hostUuid, Op.EQ, self.getUuid());
+                    q.add(VmInstanceVO_.state, Op.NOT_EQ, VmInstanceState.Unknown);
+                    List<String> vmUuids = q.listValue();
+                    vmFailedToMigrate.addAll(vmUuids);
+                }
 
                 flow(new NoRollbackFlow() {
                     String __name__ = "stop-vm-not-migrated";
 
                     @Override
                     public void run(FlowTrigger trigger, Map data) {
-                        SimpleQuery<VmInstanceVO> q = dbf.createQuery(VmInstanceVO.class);
-                        q.select(VmInstanceVO_.uuid);
-                        q.add(VmInstanceVO_.hostUuid, SimpleQuery.Op.EQ, self.getUuid());
-                        q.add(VmInstanceVO_.state, SimpleQuery.Op.EQ, VmInstanceState.Unknown);
-                        List<String> vmUuids = q.listValue();
+                        List<String> vmUuids = new ArrayList<String>();
                         vmUuids.addAll(vmFailedToMigrate);
                         vmUuids = CollectionUtils.removeDuplicateFromList(vmUuids);
 
@@ -209,10 +259,10 @@ public abstract class HostBase extends AbstractHost {
                             return;
                         }
 
-                        stopUnknownVms(vmUuids, trigger);
+                        stopFailedToMigrateVms(vmUuids, trigger);
                     }
 
-                    private void stopUnknownVms(List<String> vmUuids, final FlowTrigger trigger) {
+                    private void stopFailedToMigrateVms(List<String> vmUuids, final FlowTrigger trigger) {
                         final List<StopVmInstanceMsg> msgs = new ArrayList<StopVmInstanceMsg>();
                         for (String vmUuid : vmUuids) {
                             StopVmInstanceMsg msg = new StopVmInstanceMsg();
@@ -229,7 +279,8 @@ public abstract class HostBase extends AbstractHost {
                                 for (MessageReply r : replies) {
                                     if (!r.isSuccess()) {
                                         StopVmInstanceMsg msg = msgs.get(replies.indexOf(r));
-                                        String err = String.format("\nfailed to stop vm[uuid:%s] on host[uuid:%s, name:%s, ip:%s], %s", msg.getVmInstanceUuid(), self.getUuid(), self.getName(), self.getManagementIp(), r.getError());
+                                        String err = String.format("\nfailed to stop vm[uuid:%s] on host[uuid:%s, name:%s, ip:%s], %s",
+                                                msg.getVmInstanceUuid(), self.getUuid(), self.getName(), self.getManagementIp(), r.getError());
                                         sb.append(err);
                                         success = false;
                                     }
@@ -242,7 +293,7 @@ public abstract class HostBase extends AbstractHost {
                                 if (success || HostGlobalConfig.IGNORE_ERROR_ON_MAINTENANCE_MODE.value(Boolean.class)) {
                                     trigger.next();
                                 } else {
-                                    trigger.fail(errf.stringToOperationError(sb.toString()));
+                                    trigger.fail(operr(sb.toString()));
                                 }
                             }
                         });
@@ -266,7 +317,7 @@ public abstract class HostBase extends AbstractHost {
         }).start();
     }
 
-	private void handle(final APIReconnectHostMsg msg) {
+    private void handle(final APIReconnectHostMsg msg) {
         ReconnectHostMsg rmsg = new ReconnectHostMsg();
         rmsg.setHostUuid(self.getUuid());
         bus.makeTargetServiceIdByResourceUuid(rmsg, HostConstant.SERVICE_ID, self.getUuid());
@@ -275,8 +326,10 @@ public abstract class HostBase extends AbstractHost {
             public void run(MessageReply reply) {
                 APIReconnectHostEvent evt = new APIReconnectHostEvent(msg.getId());
                 if (!reply.isSuccess()) {
-                    evt.setErrorCode(errf.instantiateErrorCode(HostErrors.UNABLE_TO_RECONNECT_HOST, reply.getError()));
+                    evt.setError(errf.instantiateErrorCode(HostErrors.UNABLE_TO_RECONNECT_HOST, reply.getError()));
                     logger.debug(String.format("failed to reconnect host[uuid:%s] because %s", self.getUuid(), reply.getError()));
+                }else{
+                    evt.setInventory((getSelfInventory()));
                 }
                 bus.publish(evt);
             }
@@ -288,6 +341,8 @@ public abstract class HostBase extends AbstractHost {
 
         final String issuer = HostVO.class.getSimpleName();
         final List<HostInventory> ctx = Arrays.asList(HostInventory.valueOf(self));
+
+        HostInventory hinv = HostInventory.valueOf(self);
         FlowChain chain = FlowChainBuilder.newSimpleFlowChain();
         chain.setName(String.format("delete-host-%s", msg.getUuid()));
         if (msg.getDeletionMode() == APIDeleteMessage.DeletionMode.Permissive) {
@@ -346,34 +401,39 @@ public abstract class HostBase extends AbstractHost {
             public void handle(Map data) {
                 casf.asyncCascadeFull(CascadeConstant.DELETION_CLEANUP_CODE, issuer, ctx, new NopeCompletion());
                 bus.publish(evt);
+
+                HostDeletedData d = new HostDeletedData();
+                d.setInventory(HostInventory.valueOf(self));
+                d.setHostUuid(self.getUuid());
+                evtf.fire(HostCanonicalEvents.HOST_DELETED_PATH, d);
             }
         }).error(new FlowErrorHandler(msg) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
-                evt.setErrorCode(errf.instantiateErrorCode(SysErrors.DELETE_RESOURCE_ERROR, errCode));
+                evt.setError(errf.instantiateErrorCode(SysErrors.DELETE_RESOURCE_ERROR, errCode));
                 bus.publish(evt);
             }
         }).start();
-	}
+    }
 
-	private void handle(final APIDeleteHostMsg msg) {
+    private void handle(final APIDeleteHostMsg msg) {
         deleteHostByApiMessage(msg);
-	}
+    }
 
-	protected HostState changeState(HostStateEvent event) {
-		HostState currentState = self.getState();
-		HostState next = currentState.nextState(event);
-		changeStateHook(currentState, event, next);
+    protected HostState changeState(HostStateEvent event) {
+        HostState currentState = self.getState();
+        HostState next = currentState.nextState(event);
+        changeStateHook(currentState, event, next);
 
-		extpEmitter.beforeChange(self, event);
-		self.setState(next);
-		self = dbf.updateAndRefresh(self);
-		extpEmitter.afterChange(self, event, currentState);
-		logger.debug(String.format("Host[%s]'s state changed from %s to %s", self.getUuid(), currentState, self.getState()));
+        extpEmitter.beforeChange(self, event);
+        self.setState(next);
+        self = dbf.updateAndRefresh(self);
+        extpEmitter.afterChange(self, event, currentState);
+        logger.debug(String.format("Host[%s]'s state changed from %s to %s", self.getUuid(), currentState, self.getState()));
         return self.getState();
-	}
+    }
 
-	protected void changeStateByApiMessage(final APIChangeHostStateMsg msg, final NoErrorCompletion completion) {
+    protected void changeStateByApiMessage(final APIChangeHostStateMsg msg, final NoErrorCompletion completion) {
         thdf.chainSubmit(new ChainTask(msg, completion) {
             @Override
             public String getSyncSignature() {
@@ -389,11 +449,15 @@ public abstract class HostBase extends AbstractHost {
             public void run(final SyncTaskChain chain) {
                 final APIChangeHostStateEvent evt = new APIChangeHostStateEvent(msg.getId());
                 HostStateEvent stateEvent = HostStateEvent.valueOf(msg.getStateEvent());
+
+                if (self.getStatus() == HostStatus.Disconnected && stateEvent == HostStateEvent.maintain) {
+                    throw new ApiMessageInterceptionException(operr("cannot change the state of Disconnected host into Maintenance "));
+                }
                 stateEvent = stateEvent == HostStateEvent.maintain ? HostStateEvent.preMaintain : stateEvent;
                 try {
                     extpEmitter.preChange(self, stateEvent);
                 } catch (HostException he) {
-                    evt.setErrorCode(errf.instantiateErrorCode(SysErrors.CHANGE_RESOURCE_STATE_ERROR, he.getMessage()));
+                    evt.setError(errf.instantiateErrorCode(SysErrors.CHANGE_RESOURCE_STATE_ERROR, he.getMessage()));
                     bus.publish(evt);
                     done(chain);
                     return;
@@ -406,15 +470,13 @@ public abstract class HostBase extends AbstractHost {
                         public void success() {
                             changeState(HostStateEvent.maintain);
                             evt.setInventory(HostInventory.valueOf(self));
-                            // stop tracking host in maintenance mode, so no command will be sent to it
-                            tracker.untrackHost(self.getUuid());
                             bus.publish(evt);
                             done(chain);
                         }
 
                         @Override
                         public void fail(ErrorCode errorCode) {
-                            evt.setErrorCode(errf.instantiateErrorCode(HostErrors.UNABLE_TO_ENTER_MAINTENANCE_MODE, errorCode.getDetails(), errorCode));
+                            evt.setError(errf.instantiateErrorCode(HostErrors.UNABLE_TO_ENTER_MAINTENANCE_MODE, errorCode.getDetails(), errorCode));
                             changeState(HostStateEvent.enable);
                             bus.publish(evt);
                             done(chain);
@@ -445,10 +507,10 @@ public abstract class HostBase extends AbstractHost {
                 return String.format("change-host-state-%s", self.getUuid());
             }
         });
-	}
+    }
 
-	protected void handle(final APIChangeHostStateMsg msg) {
-		thdf.chainSubmit(new ChainTask() {
+    protected void handle(final APIChangeHostStateMsg msg) {
+        thdf.chainSubmit(new ChainTask(msg) {
             @Override
             public String getName() {
                 return "change-host-state-" + self.getUuid();
@@ -474,35 +536,36 @@ public abstract class HostBase extends AbstractHost {
                 return getHostSyncLevel();
             }
         });
-	}
+    }
 
-	protected void handleLocalMessage(Message msg) {
-		if (msg instanceof ChangeHostStateMsg) {
-			handle((ChangeHostStateMsg) msg);
+    protected void handleLocalMessage(Message msg) {
+        if (msg instanceof ChangeHostStateMsg) {
+            handle((ChangeHostStateMsg) msg);
         } else if (msg instanceof HostDeletionMsg) {
             handle((HostDeletionMsg) msg);
-		} else if (msg instanceof ConnectHostMsg) {
-			handle((ConnectHostMsg) msg);
-		} else if (msg instanceof ReconnectHostMsg) {
-		    handle((ReconnectHostMsg) msg);
-		} else if (msg instanceof ChangeHostConnectionStateMsg) {
-		    handle((ChangeHostConnectionStateMsg)msg);
+        } else if (msg instanceof ConnectHostMsg) {
+            handle((ConnectHostMsg) msg);
+        } else if (msg instanceof ReconnectHostMsg) {
+            handle((ReconnectHostMsg) msg);
+        } else if (msg instanceof ChangeHostConnectionStateMsg) {
+            handle((ChangeHostConnectionStateMsg) msg);
         } else if (msg instanceof PingHostMsg) {
             handle((PingHostMsg) msg);
-		} else {
-		    HostMessageHandlerExtensionPoint ext = hostMgr.getHostMessageHandlerExtension(msg); 
-		    if (ext != null) {
-		        executeHostMessageHandlerHook(ext, msg);
-		    } else {
-		        bus.dealWithUnknownMessage(msg);
-		    }
-		}
-	}
+        } else {
+            HostBaseExtensionFactory ext = hostMgr.getHostBaseExtensionFactory(msg);
+            if (ext != null) {
+                Host h = ext.getHost(self);
+                h.handleMessage(msg);
+            } else {
+                bus.dealWithUnknownMessage(msg);
+            }
+        }
+    }
 
     private void handle(final PingHostMsg msg) {
         final PingHostReply reply = new PingHostReply();
         if (self.getStatus() == HostStatus.Connecting) {
-            reply.setError(errf.stringToOperationError("host is connecting"));
+            reply.setError(operr("host is connecting"));
             bus.reply(msg, reply);
             return;
         }
@@ -511,6 +574,7 @@ public abstract class HostBase extends AbstractHost {
             @Override
             public void success() {
                 reply.setConnected(true);
+                reply.setCurrentHostStatus(self.getStatus().toString());
                 bus.reply(msg, reply);
 
                 extpEmitter.hostPingTask(HypervisorType.valueOf(self.getHypervisorType()), getSelfInventory());
@@ -518,10 +582,20 @@ public abstract class HostBase extends AbstractHost {
 
             @Override
             public void fail(ErrorCode errorCode) {
-                changeConnectionState(HostStatusEvent.disconnected);
                 reply.setConnected(false);
+                reply.setCurrentHostStatus(self.getStatus().toString());
                 reply.setError(errorCode);
                 reply.setSuccess(true);
+
+                Boolean noReconnect = (Boolean) errorCode.getFromOpaque(Opaque.NO_RECONNECT_AFTER_PING_FAILURE.toString());
+                reply.setNoReconnect(noReconnect != null && noReconnect);
+
+                if(!Q.New(HostVO.class).eq(HostVO_.uuid, msg.getHostUuid()).isExists()){
+                    reply.setNoReconnect(true);
+                }
+
+                changeConnectionState(HostStatusEvent.disconnected);
+                
                 bus.reply(msg, reply);
             }
         });
@@ -543,6 +617,11 @@ public abstract class HostBase extends AbstractHost {
                 bus.reply(msg, new HostDeletionReply());
                 tracker.untrackHost(self.getUuid());
                 chain.next();
+            }
+
+            @Override
+            public int getSyncLevel() {
+                return getHostSyncLevel();
             }
 
             @Override
@@ -584,12 +663,15 @@ public abstract class HostBase extends AbstractHost {
                             logger.debug(String.format("Successfully reconnect host[uuid:%s]", self.getUuid()));
                         } else {
                             r.setError(errf.instantiateErrorCode(HostErrors.UNABLE_TO_RECONNECT_HOST, reply.getError()));
-                            logger.debug(String.format("Failed to reconnect host[uuid:%s] because %s", self.getUuid(), reply.getError()));
+                            logger.debug(String.format("Failed to reconnect host[uuid:%s] because %s",
+                                    self.getUuid(), reply.getError()));
                         }
                         bus.reply(msg, r);
-                        finish(chain);
                     }
                 });
+
+                // no need to block the queue, because the ConnectHostMsg will be queued as well
+                finish(chain);
             }
 
             @Override
@@ -629,7 +711,7 @@ public abstract class HostBase extends AbstractHost {
     }
 
     private void handle(final ChangeHostConnectionStateMsg msg) {
-	    thdf.chainSubmit(new ChainTask(msg) {
+        thdf.chainSubmit(new ChainTask(msg) {
             @Override
             public String getName() {
                 return "change-host-connection-state-" + self.getUuid();
@@ -639,7 +721,8 @@ public abstract class HostBase extends AbstractHost {
                 try {
                     extpEmitter.connectionReestablished(HypervisorType.valueOf(self.getHypervisorType()), getSelfInventory());
                 } catch (HostException e) {
-                    logger.warn(String.format("unable to reestablish connection to kvm host[uuid:%s, ip:%s], %s", self.getUuid(), self.getManagementIp(), e.getMessage()), e);
+                    logger.warn(String.format("unable to reestablish connection to kvm host[uuid:%s, ip:%s], %s",
+                            self.getUuid(), self.getManagementIp(), e.getMessage()), e);
                     return false;
                 }
 
@@ -678,99 +761,140 @@ public abstract class HostBase extends AbstractHost {
         return HostInventory.valueOf(self);
     }
 
-    protected void changeConnectionState(final HostStatusEvent event) {
-	    HostStatus before = self.getStatus();
-	    HostStatus next = before.nextStatus(event);
+    protected boolean changeConnectionState(final HostStatusEvent event) {
+        HostStatus before = self.getStatus();
+        HostStatus next = before.nextStatus(event);
         if (before == next) {
-            return;
+            return false;
         }
 
-	    self.setStatus(next);
-	    self = dbf.updateAndRefresh(self);
-	    logger.debug(String.format("Host %s [uuid:%s] changed connection state from %s to %s", self.getName(), self.getUuid(), before, next));
-	    notifyEmitter.notifyHostConnectionChange(HostInventory.valueOf(self), before, next);
-	}
+        self.setStatus(next);
+        self = dbf.updateAndRefresh(self);
+        logger.debug(String.format("Host %s [uuid:%s] changed connection state from %s to %s",
+                self.getName(), self.getUuid(), before, next));
 
-	private void handle(final ConnectHostMsg msg) {
-		thdf.chainSubmit(new ChainTask(msg) {
-            @Override
-            public String getName() {
-                return "host-connect-to-hypervisor-" + self.getUuid();
-            }
+        HostStatusChangedData data = new HostStatusChangedData();
+        data.setHostUuid(self.getUuid());
+        data.setNewStatus(next.toString());
+        data.setOldStatus(before.toString());
+        data.setInventory(HostInventory.valueOf(self));
+        evtf.fire(HostCanonicalEvents.HOST_STATUS_CHANGED_PATH, data);
 
-            @Override
-            public String getSyncSignature() {
-                return id;
-            }
-
-            @Override
-            public void run(final SyncTaskChain chain) {
-                connectHost(msg, new NoErrorCompletion(chain) {
+        CollectionUtils.safeForEach(pluginRgty.getExtensionList(AfterChangeHostStatusExtensionPoint.class),
+                new ForEachFunction<AfterChangeHostStatusExtensionPoint>() {
                     @Override
-                    public void done() {
-                        chain.next();
+                    public void run(AfterChangeHostStatusExtensionPoint arg) {
+                        arg.afterChangeHostStatus(self.getUuid(), before, next);
                     }
                 });
+        return true;
+    }
+
+    private void handle(final ConnectHostMsg msg) {
+        thdf.chainSubmit(new ChainTask(msg) {
+            @Override
+            public String getSyncSignature() {
+                return String.format("connect-host-%s", self.getUuid());
             }
 
             @Override
-            public int getSyncLevel() {
-                return getHostSyncLevel();
-            }
+            public void run(SyncTaskChain chain) {
+                checkState();
+                final ConnectHostReply reply = new ConnectHostReply();
 
-        });
-	}
-
-    private void connectHost(final ConnectHostMsg msg, final NoErrorCompletion completion) {
-        checkState();
-        final ConnectHostReply reply = new ConnectHostReply();
-
-        FlowChain flowChain = FlowChainBuilder.newShareFlowChain();
-        flowChain.setName(String.format("connect-host-%s", self.getUuid()));
-        flowChain.then(new ShareFlow() {
-            @Override
-            public void setup() {
-                flow(new NoRollbackFlow() {
-                    String __name__ = "connect-host";
-
+                final FlowChain flowChain = FlowChainBuilder.newShareFlowChain();
+                flowChain.setName(String.format("connect-host-%s", self.getUuid()));
+                flowChain.then(new ShareFlow() {
                     @Override
-                    public void run(final FlowTrigger trigger, Map data) {
-                        changeConnectionState(HostStatusEvent.connecting);
-                        connectHook(ConnectHostInfo.fromConnectHostMsg(msg), new Completion(trigger) {
+                    public void setup() {
+                        flow(new NoRollbackFlow() {
+                            String __name__ = "connect-host";
+
                             @Override
-                            public void success() {
+                            public void run(final FlowTrigger trigger, Map data) {
+                                changeConnectionState(HostStatusEvent.connecting);
+                                connectHook(ConnectHostInfo.fromConnectHostMsg(msg), new Completion(trigger) {
+                                    @Override
+                                    public void success() {
+                                        trigger.next();
+                                    }
+
+                                    @Override
+                                    public void fail(ErrorCode errorCode) {
+                                        trigger.fail(errorCode);
+                                    }
+                                });
+                            }
+                        });
+
+                        flow(new NoRollbackFlow() {
+                            String __name__ = "check-license";
+
+                            @Override
+                            public void run(FlowTrigger trigger, Map data) {
+                                for (PostHostConnectExtensionPoint p : pluginRgty.getExtensionList(PostHostConnectExtensionPoint.class)) {
+                                    p.postHostConnect(getSelfInventory());
+                                }
                                 trigger.next();
                             }
+                        });
+
+                        flow(new NoRollbackFlow() {
+                            String __name__ = "recalculate-host-capacity";
 
                             @Override
-                            public void fail(ErrorCode errorCode) {
-                                trigger.fail(errorCode);
+                            public void run(FlowTrigger trigger, Map data) {
+                                RecalculateHostCapacityMsg msg = new RecalculateHostCapacityMsg();
+                                msg.setHostUuid(self.getUuid());
+                                bus.makeLocalServiceId(msg, HostAllocatorConstant.SERVICE_ID);
+                                bus.send(msg);
+                                trigger.next();
+                            }
+                        });
+
+                        done(new FlowDoneHandler(msg) {
+                            @Override
+                            public void handle(Map data) {
+                                changeConnectionState(HostStatusEvent.connected);
+                                tracker.trackHost(self.getUuid());
+
+                                CollectionUtils.safeForEach(pluginRgty.getExtensionList(HostAfterConnectedExtensionPoint.class),
+                                        new ForEachFunction<HostAfterConnectedExtensionPoint>() {
+                                            @Override
+                                            public void run(HostAfterConnectedExtensionPoint ext) {
+                                                ext.afterHostConnected(getSelfInventory());
+                                            }
+                                        });
+
+                                bus.reply(msg, reply);
+                            }
+                        });
+
+                        error(new FlowErrorHandler(msg) {
+                            @Override
+                            public void handle(ErrorCode errCode, Map data) {
+                                changeConnectionState(HostStatusEvent.disconnected);
+
+                                reply.setError(errCode);
+                                bus.reply(msg, reply);
+                            }
+                        });
+
+                        Finally(new FlowFinallyHandler(msg) {
+                            @Override
+                            public void Finally() {
+                                chain.next();
                             }
                         });
                     }
-                });
-
-                done(new FlowDoneHandler(completion, msg) {
-                    @Override
-                    public void handle(Map data) {
-                        changeConnectionState(HostStatusEvent.connected);
-                        tracker.trackHost(self.getUuid());
-                        bus.reply(msg, reply);
-                        completion.done();
-                    }
-                });
-
-                error(new FlowErrorHandler(completion, msg) {
-                    @Override
-                    public void handle(ErrorCode errCode, Map data) {
-                        changeConnectionState(HostStatusEvent.disconnected);
-                        reply.setError(errCode);
-                        bus.reply(msg, reply);
-                        completion.done();
-                    }
-                });
+                }).start();
             }
-        }).start();
+
+            @Override
+            public String getName() {
+                return "connect-host";
+            }
+        });
     }
 
     private void changeStateByLocalMessage(final ChangeHostStateMsg msg, final NoErrorCompletion completion) {
@@ -806,10 +930,10 @@ public abstract class HostBase extends AbstractHost {
                 return String.format("change-host-state-%s", self.getUuid());
             }
         });
-	}
+    }
 
-	private void handle(final ChangeHostStateMsg msg) {
-		thdf.chainSubmit(new ChainTask(msg) {
+    private void handle(final ChangeHostStateMsg msg) {
+        thdf.chainSubmit(new ChainTask(msg) {
             @Override
             public String getName() {
                 return "change-host-state-" + self.getUuid();
@@ -835,14 +959,15 @@ public abstract class HostBase extends AbstractHost {
                 return getHostSyncLevel();
             }
         });
-	}
+    }
 
-	@Override
-	public void handleMessage(Message msg) {
-		if (msg instanceof APIMessage) {
-			handleApiMessage((APIMessage) msg);
-		} else {
-			handleLocalMessage(msg);
-		}
-	}
+    @Override
+    @MessageSafe
+    public void handleMessage(Message msg) {
+        if (msg instanceof APIMessage) {
+            handleApiMessage((APIMessage) msg);
+        } else {
+            handleLocalMessage(msg);
+        }
+    }
 }

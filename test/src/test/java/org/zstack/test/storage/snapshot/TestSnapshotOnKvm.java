@@ -46,9 +46,9 @@ public class TestSnapshotOnKvm {
         snapshotKvmSimulator = loader.getComponent(VolumeSnapshotKvmSimulator.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException {
+
+    @Test
+    public void test() throws ApiSenderException {
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         String volUuid = vm.getRootVolumeUuid();
         VolumeSnapshotInventory inv = api.createSnapshot(volUuid);
@@ -57,7 +57,7 @@ public class TestSnapshotOnKvm {
         VolumeVO vol = dbf.findByUuid(volUuid, VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(0, svo.getDistance());
@@ -67,6 +67,9 @@ public class TestSnapshotOnKvm {
         Assert.assertNotNull(cvo);
 
         snapshotKvmSimulator.validate(inv);
+
+        api.destroyVmInstance(vm.getUuid());
+        api.expungeVm(vm.getUuid(), null);
     }
 
 }

@@ -11,8 +11,11 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkDnsVO;
 import org.zstack.header.network.l3.L3NetworkDnsVO_;
@@ -29,6 +32,8 @@ import org.zstack.network.service.virtualrouter.VirtualRouterCommands.AddDhcpEnt
 import org.zstack.network.service.virtualrouter.VirtualRouterCommands.DhcpInfo;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.Tuple;
 import javax.persistence.TypedQuery;
@@ -49,6 +54,8 @@ public class VirtualRouterSyncDHCPOnStartFlow implements Flow {
     private ErrorFacade errf;
     @Autowired
     private CloudBus bus;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
 	private List<String> getDns(String l3NetworkUuid) {
 		SimpleQuery<L3NetworkDnsVO> q = dbf.createQuery(L3NetworkDnsVO.class);
@@ -91,6 +98,7 @@ public class VirtualRouterSyncDHCPOnStartFlow implements Flow {
 			info.setGateway(nic.getGateway());
 			info.setIp(nic.getIp());
 			info.setMac(nic.getMac());
+            info.setVrNicMac(vr.getGuestNic().getMac());
 			info.setNetmask(nic.getNetmask());
             if (l3NetworkUuid.equals(defaultL3Uuid)) {
                 info.setDefaultL3Network(true);
@@ -148,6 +156,7 @@ public class VirtualRouterSyncDHCPOnStartFlow implements Flow {
 
         VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setPath(VirtualRouterConstant.VR_ADD_DHCP_PATH);
         msg.setVmInstanceUuid(vr.getUuid());
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
@@ -163,9 +172,8 @@ public class VirtualRouterSyncDHCPOnStartFlow implements Flow {
                 VirtualRouterAsyncHttpCallReply re = reply.castReply();
                 AddDhcpEntryRsp ret =  re.toResponse(AddDhcpEntryRsp.class);
                 if (!ret.isSuccess()) {
-                    String err = String.format("unable to program dhcp entries served by virtual router[uuid:%s, ip:%s], %s", vr.getUuid(), vr.getManagementNic().getIp(), ret.getError());
-                    logger.warn(err);
-                    chain.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("unable to program dhcp entries served by virtual router[uuid:%s, ip:%s], %s", vr.getUuid(), vr.getManagementNic().getIp(), ret.getError());
+                    chain.fail(err);
                 } else {
                     logger.debug(String.format("successfully programmed dhcp entries served by virtual router[uuid:%s, ip:%s]", vr.getUuid(), vr.getManagementNic().getIp()));
                     chain.next();
@@ -175,7 +183,7 @@ public class VirtualRouterSyncDHCPOnStartFlow implements Flow {
     }
 
     @Override
-    public void rollback(FlowTrigger chain, Map data) {
+    public void rollback(FlowRollback chain, Map data) {
         chain.rollback();
     }
 }

@@ -10,6 +10,7 @@ import org.zstack.header.host.APIQueryHostMsg;
 import org.zstack.header.host.APIQueryHostReply;
 import org.zstack.header.host.HostInventory;
 import org.zstack.header.query.QueryCondition;
+import org.zstack.header.query.QueryOp;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
@@ -19,6 +20,8 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
+
+import static org.zstack.utils.CollectionDSL.list;
 
 public class TestQueryHost {
     CLogger logger = Utils.getLogger(TestQueryHost.class);
@@ -38,16 +41,32 @@ public class TestQueryHost {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
-    public void test() throws InterruptedException,ApiSenderException {
+    public void test() throws InterruptedException, ApiSenderException {
         HostInventory inv = deployer.hosts.get("TestHost3");
         QueryTestValidator.validateEQ(new APIQueryHostMsg(), api, APIQueryHostReply.class, inv);
         QueryTestValidator.validateRandomEQConjunction(new APIQueryHostMsg(), api, APIQueryHostReply.class, inv, 3);
-        
+
         APIQueryHostMsg msg = new APIQueryHostMsg();
         msg.setConditions(new ArrayList<QueryCondition>());
         APIQueryHostReply reply = api.query(msg, APIQueryHostReply.class);
         Assert.assertEquals(5, reply.getInventories().size());
+
+        msg = new APIQueryHostMsg();
+        // this case should not cause error
+        msg.addQueryCondition("uuid", QueryOp.IN, ",,,,,");
+        api.query(msg, APIQueryHostReply.class);
+
+        boolean s = false;
+        msg = new APIQueryHostMsg();
+        msg.setFields(list("totalCpuCapacity"));
+        msg.setConditions(new ArrayList<QueryCondition>());
+        try {
+            api.query(msg, APIQueryHostReply.class);
+        } catch (ApiSenderException e) {
+            s = true;
+        }
+        Assert.assertTrue(s);
     }
 }

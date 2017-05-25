@@ -1,6 +1,7 @@
 package org.zstack.test.compute.vm;
 
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmInstanceMigrateExtensionPoint;
 import org.zstack.utils.Utils;
@@ -13,13 +14,12 @@ public class VmMigrateExtension implements VmInstanceMigrateExtensionPoint {
     boolean afterCalled = false;
     boolean failedCalled = false;
     String expectedUuid;
-    
+
     @Override
-    public String preMigrateVm(VmInstanceInventory inv, String huuid) {
+    public void preMigrateVm(VmInstanceInventory inv, String huuid) {
         if (preventMigrate) {
-            return "Prevent migrating vm on purpose";
+            throw new CloudRuntimeException("on purpose");
         }
-        return null;
     }
 
     @Override
@@ -32,7 +32,7 @@ public class VmMigrateExtension implements VmInstanceMigrateExtensionPoint {
     }
 
     @Override
-    public void afterMigrateVm(VmInstanceInventory inv, String huuid) {
+    public void afterMigrateVm(VmInstanceInventory inv, String srcHostUuid) {
         if (inv.getUuid().equals(expectedUuid)) {
             afterCalled = true;
         } else {

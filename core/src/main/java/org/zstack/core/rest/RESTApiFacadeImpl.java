@@ -3,11 +3,10 @@ package org.zstack.core.rest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.core.type.filter.AssignableTypeFilter;
-import org.springframework.stereotype.Controller;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusEventListener;
+import org.zstack.header.Component;
 import org.zstack.header.apimediator.ApiMediatorConstant;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.*;
@@ -16,7 +15,9 @@ import org.zstack.header.rest.RestAPIResponse;
 import org.zstack.header.rest.RestAPIState;
 import org.zstack.header.rest.RestAPIVO;
 import org.zstack.header.search.APISearchMessage;
+import org.zstack.utils.ExceptionDSL;
 import org.zstack.utils.Utils;
+import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
 import javax.persistence.EntityManager;
@@ -25,11 +26,10 @@ import javax.persistence.EntityTransaction;
 import javax.persistence.Query;
 import java.util.*;
 
-public class RESTApiFacadeImpl implements RESTApiFacade, CloudBusEventListener {
+public class RESTApiFacadeImpl implements RESTApiFacade, CloudBusEventListener, Component {
     private static final CLogger logger = Utils.getLogger(RESTApiFacadeImpl.class);
 
     private EntityManagerFactory entityManagerFactory;
-    private EntityManager entityManager = null;
     private Set<String> basePkgNames;
     private List<String> processingRequests = Collections.synchronizedList(new ArrayList<String>(100));
 
@@ -76,10 +76,10 @@ public class RESTApiFacadeImpl implements RESTApiFacade, CloudBusEventListener {
             tran.commit();
             return vo;
         } catch (Exception e) {
-            tran.rollback();
+            ExceptionDSL.exceptionSafe(tran::rollback);
             throw new CloudRuntimeException(e);
         } finally {
-            mgr.close();
+            ExceptionDSL.exceptionSafe(mgr::close);
         }
     }
 
@@ -141,7 +141,7 @@ public class RESTApiFacadeImpl implements RESTApiFacade, CloudBusEventListener {
         return rsp;
     }
 
-    private EntityManager getEntityManager() {
+    private synchronized EntityManager getEntityManager() {
         return entityManagerFactory.createEntityManager();
     }
 
@@ -194,5 +194,15 @@ public class RESTApiFacadeImpl implements RESTApiFacade, CloudBusEventListener {
             basePkgNames.add("org.zstack");
         }
         return basePkgNames;
+    }
+
+    @Override
+    public boolean start() {
+        return true;
+    }
+
+    @Override
+    public boolean stop() {
+        return true;
     }
 }

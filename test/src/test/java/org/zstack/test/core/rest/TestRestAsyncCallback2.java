@@ -26,7 +26,7 @@ public class TestRestAsyncCallback2 {
     String url;
     CountDownLatch latch = new CountDownLatch(1);
     boolean success = false;
-    
+
     @Before
     public void setUp() throws Exception {
         wbean = new WebBeanConstructor();
@@ -41,7 +41,7 @@ public class TestRestAsyncCallback2 {
         String url = wbean.buildUrl(RESTBeanForTest.ROOT, RESTBeanForTest.CALLBACK_JSON_PATH);
         final Map<String, String> hi = new HashMap<String, String>();
         hi.put("hello", "world");
-        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<Map>() {
+        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<Map>(null) {
 
             @Override
             public void fail(ErrorCode err) {
@@ -65,15 +65,15 @@ public class TestRestAsyncCallback2 {
             public Class<Map> getReturnClass() {
                 return Map.class;
             }
-            
+
         }, TimeUnit.SECONDS, 10);
         latch.await(1, TimeUnit.MINUTES);
         Assert.assertTrue(success);
     }
-    
+
     @After
     public void tearDown() {
-        wbean.stopTomcat();
+        wbean.stopJetty();
     }
 
 }

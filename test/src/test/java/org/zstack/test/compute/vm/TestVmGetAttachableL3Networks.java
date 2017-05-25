@@ -42,7 +42,7 @@ public class TestVmGetAttachableL3Networks {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         VmInstanceInventory cvm = deployer.vms.get("TestVm");
@@ -119,5 +119,11 @@ public class TestVmGetAttachableL3Networks {
         for (L3NetworkInventory l3 : l3s) {
             Assert.assertFalse(l3.getUuid().equals(l31.getUuid()));
         }
+
+        l3s = api.getInterdependentL3NetworksByImageUuid(vm.getImageUuid(), vm.getZoneUuid(), session1);
+        Assert.assertEquals(3, l3s.size());
+
+        l3s = api.getInterdependentL3NetworksByImageUuid(vm.getImageUuid(), vm.getZoneUuid(), session2);
+        Assert.assertEquals(2, l3s.size());
     }
 }

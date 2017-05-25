@@ -2,6 +2,7 @@ package org.zstack.simulator.storage.backup;
 
 import org.zstack.core.Platform;
 import org.zstack.header.core.Completion;
+import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.storage.backup.*;
 import org.zstack.storage.backup.BackupStorageBase;
@@ -11,10 +12,10 @@ import org.zstack.utils.logging.CLogger;
 import java.util.List;
 
 public class SimulatorBackupStorage extends BackupStorageBase {
-	private static final CLogger logger = Utils.getLogger(SimulatorBackupStorage.class);
-	
-	public SimulatorBackupStorage(BackupStorageVO self) {
-	    super(self);
+    private static final CLogger logger = Utils.getLogger(SimulatorBackupStorage.class);
+
+    public SimulatorBackupStorage(BackupStorageVO self) {
+        super(self);
     }
 
     @Override
@@ -22,10 +23,10 @@ public class SimulatorBackupStorage extends BackupStorageBase {
         logger.debug(String.format("SimulatorBackupStorage[uuid:%s] gets deleted", self.getUuid()));
     }
 
-	@Override
-	public void changeStateHook(BackupStorageStateEvent evt, BackupStorageState nextState) {
-		logger.debug(String.format("SimulatorBackupStorage[uuid:%s] changes state from %s to %s", self.getUuid(), self.getState(), nextState));
-	}
+    @Override
+    public void changeStateHook(BackupStorageStateEvent evt, BackupStorageState nextState) {
+        logger.debug(String.format("SimulatorBackupStorage[uuid:%s] changes state from %s to %s", self.getUuid(), self.getState(), nextState));
+    }
 
     @Override
     public void detachHook(Completion completion) {
@@ -39,6 +40,17 @@ public class SimulatorBackupStorage extends BackupStorageBase {
         completion.success();
     }
 
+    @Override
+    protected void exceptionIfImageSizeGreaterThanAvailableCapacity(String url) {
+        // To override the behavior of the base class, thus avoid real HEAD request.
+    }
+
+    @Override
+    protected void handle(GetImageSizeOnBackupStorageMsg msg) {
+        GetImageSizeOnBackupStorageReply reply = new GetImageSizeOnBackupStorageReply();
+        reply.setSize(233);
+        bus.reply(msg, reply);
+    }
 
     @Override
     protected void handle(DownloadImageMsg msg) {
@@ -47,6 +59,8 @@ public class SimulatorBackupStorage extends BackupStorageBase {
         reply.setMd5sum(Platform.getUuid());
         reply.setInstallPath(Utils.getPathUtil().join(self.getUrl(), inv.getName()));
         reply.setSize(100);
+        reply.setActualSize(100L);
+        reply.setFormat("simulator");
         bus.reply(msg, reply);
     }
 
@@ -66,13 +80,6 @@ public class SimulatorBackupStorage extends BackupStorageBase {
     }
 
     @Override
-    protected void handle(PingBackupStorageMsg msg) {
-        PingBackupStorageReply reply = new PingBackupStorageReply();
-        reply.setAvailable(true);
-        bus.reply(msg, reply);
-    }
-
-    @Override
     protected void handle(BackupStorageAskInstallPathMsg msg) {
         BackupStorageAskInstallPathReply reply = new BackupStorageAskInstallPathReply();
         reply.setInstallPath(String.format("/%s/%s/%s.img", msg.getImageMediaType(), msg.getImageUuid(), msg.getImageUuid()));
@@ -80,7 +87,17 @@ public class SimulatorBackupStorage extends BackupStorageBase {
     }
 
     @Override
-    protected void connectHook(Completion completion) {
+    protected void handle(SyncImageSizeOnBackupStorageMsg msg) {
+        throw new CloudRuntimeException("not supported yet");
+    }
+
+    @Override
+    protected void connectHook(boolean newAdded, Completion completion) {
+        completion.success();
+    }
+
+    @Override
+    protected void pingHook(Completion completion) {
         completion.success();
     }
 

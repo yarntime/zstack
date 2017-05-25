@@ -14,7 +14,7 @@ import java.sql.Timestamp;
 public class SharedResourceVO {
     @Column
     @Id
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column
@@ -39,6 +39,11 @@ public class SharedResourceVO {
 
     @Column
     private Timestamp createDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public Long getId() {
         return id;

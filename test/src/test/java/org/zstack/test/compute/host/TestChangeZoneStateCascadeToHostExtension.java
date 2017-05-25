@@ -12,10 +12,8 @@ import org.zstack.header.host.HostStateEvent;
 import org.zstack.header.zone.ZoneInventory;
 import org.zstack.header.zone.ZoneState;
 import org.zstack.header.zone.ZoneStateEvent;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
+
 public class TestChangeZoneStateCascadeToHostExtension {
     Api api;
     ComponentLoader loader;
@@ -25,16 +23,22 @@ public class TestChangeZoneStateCascadeToHostExtension {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
-        loader = con.addXml("PortalForUnitTest.xml").addXml("ClusterManager.xml").addXml("ZoneManager.xml")
-                .addXml("HostManager.xml").addXml("Simulator.xml").addXml("ChangeHostStateExtension.xml").addXml("AccountManager.xml").build();
+        loader = con.addXml("PortalForUnitTest.xml")
+                .addXml("ClusterManager.xml")
+                .addXml("ZoneManager.xml")
+                .addXml("HostManager.xml")
+                .addXml("Simulator.xml")
+                .addXml("ChangeHostStateExtension.xml")
+                .addXml("HostAllocatorManager.xml")
+                .addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
         ext = loader.getComponent(ChangeHostStateExtension.class);
         api = new Api();
         api.startServer();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         try {
@@ -50,7 +54,7 @@ public class TestChangeZoneStateCascadeToHostExtension {
             Assert.assertEquals(ZoneState.Enabled.toString(), zone.getState());
             host = api.listHosts(null).get(0);
             Assert.assertEquals(HostState.Enabled.toString(), host.getState());
-            
+
             ext.setExpectedCurrent(HostState.Enabled);
             ext.setExpectedNext(HostState.Disabled);
             ext.setExpectedStateEvent(HostStateEvent.disable);

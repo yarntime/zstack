@@ -1,11 +1,17 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.vm.VmNicVO;
 
 import java.util.List;
+
+import static java.util.Arrays.asList;
 
 /**
  * @api
@@ -48,6 +54,11 @@ import java.util.List;
  * see :ref:`APIDeleteVmNicFromSecurityGroupEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/{securityGroupUuid}/vm-instances/nics",
+        method = HttpMethod.DELETE,
+        responseClass = APIDeleteVmNicFromSecurityGroupEvent.class
+)
 public class APIDeleteVmNicFromSecurityGroupMsg extends APIMessage {
     /**
      * @desc security group uuid
@@ -74,4 +85,26 @@ public class APIDeleteVmNicFromSecurityGroupMsg extends APIMessage {
     public void setVmNicUuids(List<String> vmNicUuids) {
         this.vmNicUuids = vmNicUuids;
     }
+ 
+    public static APIDeleteVmNicFromSecurityGroupMsg __example__() {
+        APIDeleteVmNicFromSecurityGroupMsg msg = new APIDeleteVmNicFromSecurityGroupMsg();
+        msg.setSecurityGroupUuid(uuid());
+        msg.setVmNicUuids(asList(uuid()));
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Delete vm nics[uuid:%s]",vmNicUuids).resource(securityGroupUuid,SecurityGroupVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

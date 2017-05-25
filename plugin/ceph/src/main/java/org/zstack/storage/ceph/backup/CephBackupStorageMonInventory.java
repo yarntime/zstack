@@ -17,6 +17,12 @@ public class CephBackupStorageMonInventory {
     private Timestamp createDate;
     private Timestamp lastOpDate;
     private String backupStorageUuid;
+    private String monAddr;
+    private Integer sshPort;
+    private String status;
+    private String sshUsername;
+    private String sshPassword;
+    private String monUuid;
 
     public static CephBackupStorageMonInventory valueOf(CephBackupStorageMonVO vo) {
         CephBackupStorageMonInventory inv = new CephBackupStorageMonInventory();
@@ -25,6 +31,12 @@ public class CephBackupStorageMonInventory {
         inv.setCreateDate(vo.getCreateDate());
         inv.setLastOpDate(vo.getLastOpDate());
         inv.setBackupStorageUuid(vo.getBackupStorageUuid());
+        inv.setSshPort(vo.getSshPort());
+        inv.setSshUsername(vo.getSshUsername());
+        inv.setSshPassword(vo.getSshPassword());
+        inv.setMonUuid(vo.getUuid());
+        inv.setStatus(vo.getStatus().toString());
+        inv.setMonAddr(vo.getMonAddr());
         return inv;
     }
 
@@ -37,6 +49,44 @@ public class CephBackupStorageMonInventory {
         return invs;
     }
 
+    public String getMonAddr() {
+        return monAddr;
+    }
+
+    public void setMonAddr(String monAddr) {
+        this.monAddr = monAddr;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getSshUsername() {
+
+        return sshUsername;
+    }
+
+    public void setSshUsername(String sshUsername) {
+        this.sshUsername = sshUsername;
+    }
+    public String getSshPassword() {
+        return sshPassword;
+    }
+
+    public void setSshPassword(String sshPassword) {
+        this.sshPassword = sshPassword;
+    }
+    public Integer getSshPort() {
+        return sshPort;
+    }
+
+    public void setSshPort(Integer sshPort) {
+        this.sshPort = sshPort;
+    }
     public String getBackupStorageUuid() {
         return backupStorageUuid;
     }
@@ -75,5 +125,12 @@ public class CephBackupStorageMonInventory {
 
     public void setHostname(String hostname) {
         this.hostname = hostname;
+    }
+    public String getMonUuid() {
+        return monUuid;
+    }
+
+    public void setMonUuid(String monUuid) {
+        this.monUuid = monUuid;
     }
 }

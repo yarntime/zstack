@@ -6,9 +6,7 @@ import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
-import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.allocator.*;
-import org.zstack.header.exception.CloudRuntimeException;
+import org.zstack.header.allocator.AbstractHostAllocatorFlow;
 import org.zstack.header.host.HostVO;
 import org.zstack.header.storage.primary.PrimaryStorageClusterRefVO;
 import org.zstack.header.storage.primary.PrimaryStorageClusterRefVO_;
@@ -32,7 +30,8 @@ public class AttachedVolumePrimaryStorageAllocatorFlow extends AbstractHostAlloc
         throwExceptionIfIAmTheFirstFlow();
 
         if (VmOperation.NewCreate.toString().equals(spec.getVmOperation())) {
-            throw new CloudRuntimeException("AttachedVolumePrimaryStorageAllocatorFlow can not be used for creating new vm. It's for starting/migrating vm");
+            next(candidates);
+            return;
         }
 
         VmInstanceInventory vm = spec.getVmInstance();
@@ -47,17 +46,17 @@ public class AttachedVolumePrimaryStorageAllocatorFlow extends AbstractHostAlloc
         SimpleQuery<PrimaryStorageClusterRefVO> q = dbf.createQuery(PrimaryStorageClusterRefVO.class);
         q.add(PrimaryStorageClusterRefVO_.primaryStorageUuid, Op.IN, requiredPsUuids);
         List<PrimaryStorageClusterRefVO> refs = q.list();
-        Map<String, Set<String>> clusterPs = new HashMap<String, Set<String>>();
+        Map<String, Set<String>> clusterPs = new HashMap<>();
         for (PrimaryStorageClusterRefVO ref : refs) {
             Set<String> pss = clusterPs.get(ref.getClusterUuid());
             if (pss == null) {
-                pss = new HashSet<String>();
+                pss = new HashSet<>();
                 clusterPs.put(ref.getClusterUuid(), pss);
             }
             pss.add(ref.getPrimaryStorageUuid());
         }
 
-        List<String> clusterHavingAllPs = new ArrayList<String>();
+        List<String> clusterHavingAllPs = new ArrayList<>();
         for (Map.Entry<String, Set<String>> e : clusterPs.entrySet()) {
             if (e.getValue().containsAll(requiredPsUuids)) {
                 clusterHavingAllPs.add(e.getKey());
@@ -66,7 +65,7 @@ public class AttachedVolumePrimaryStorageAllocatorFlow extends AbstractHostAlloc
 
         // find out host in above result clusters
         List<HostVO> tmp = candidates;
-        candidates = new ArrayList<HostVO>();
+        candidates = new ArrayList<>();
         if (!clusterHavingAllPs.isEmpty()) {
             for (HostVO h : tmp) {
                 if (clusterHavingAllPs.contains(h.getClusterUuid())) {

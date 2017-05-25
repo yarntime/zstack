@@ -21,11 +21,10 @@ import org.zstack.test.VmCreator;
 import org.zstack.test.deployer.Deployer;
 
 /**
- *
  * 1. two l2Networks
  * 2. create vm which has two l3 on two l2
  * 3. detach one l2
- *
+ * <p>
  * confirm vm stopped
  */
 public class TestCascadeDeletion27 {
@@ -61,11 +60,16 @@ public class TestCascadeDeletion27 {
         creator.instanceOfferingUuid = instanceOffering.getUuid();
         VmInstanceInventory vm = creator.create();
 
+        VmInstanceVO vmvo = dbf.findByUuid(vm.getUuid(), VmInstanceVO.class);
+        int nicNumber = vmvo.getVmNics().size();
+        Assert.assertTrue(nicNumber >= 1);
+
         L2NetworkInventory l21 = deployer.l2Networks.get("TestL2Network1");
         ClusterInventory cluster = deployer.clusters.get("TestCluster1");
         api.detachL2NetworkFromCluster(l21.getUuid(), cluster.getUuid());
 
-        VmInstanceVO vmvo = dbf.findByUuid(vm.getUuid(), VmInstanceVO.class);
+        vmvo = dbf.findByUuid(vm.getUuid(), VmInstanceVO.class);
         Assert.assertEquals(VmInstanceState.Stopped, vmvo.getState());
+        Assert.assertTrue(nicNumber > vmvo.getVmNics().size());
     }
 }

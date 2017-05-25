@@ -8,6 +8,7 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.core.type.filter.AssignableTypeFilter;
+import org.springframework.stereotype.Component;
 import org.zstack.header.configuration.NoPython;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.identity.APISessionMessage;
@@ -21,7 +22,9 @@ import org.zstack.utils.path.PathUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class PythonApiActionGenerator {
     public static void generatePythonApiAction(List<String> basePkgs, String resultFolder) throws IOException {
@@ -29,11 +32,13 @@ public class PythonApiActionGenerator {
         pysb.append(String.format("from apibinding import inventory"));
         pysb.append(String.format("\nfrom apibinding import api"));
         pysb.append(String.format("\nfrom zstacklib.utils import jsonobject"));
-        
+
         ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
         scanner.addIncludeFilter(new AssignableTypeFilter(APIMessage.class));
         scanner.addExcludeFilter(new AnnotationTypeFilter(NoPython.class));
+        scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
         for (String pkg : basePkgs) {
+            List<Class<?>> clazzList = new ArrayList<>();
             for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
                 try {
                     Class<?> clazz = Class.forName(bd.getBeanClassName());
@@ -44,22 +49,30 @@ public class PythonApiActionGenerator {
                     if (TypeUtils.isTypeOf(clazz, APISearchMessage.class, APIGetMessage.class, APIListMessage.class)) {
                         continue;
                     }
-                    
-                    if (APIQueryMessage.class.isAssignableFrom(clazz)) {
-                        generateQueryMsg(pysb, clazz);
-                    } else {
-                        generateApiMsg(pysb, clazz);
-                    }
+
+                    clazzList.add(clazz);
                 } catch (Exception e) {
                     throw new CloudRuntimeException(e);
                 }
             }
+            List<Class<?>> sortedClazzList = clazzList.stream().sorted(
+                    (c1, c2) -> {
+                        return populateActionName(c1).compareTo(populateActionName(c2));
+                    }
+            ).collect(Collectors.toList());
+            for (Class<?> clazz : sortedClazzList) {
+                if (APIQueryMessage.class.isAssignableFrom(clazz)) {
+                    generateQueryMsg(pysb, clazz);
+                } else {
+                    generateApiMsg(pysb, clazz);
+                }
+            }
         }
-        
+
         String pyStr = pysb.toString();
         FileUtils.write(new File(PathUtil.join(resultFolder, "api_actions.py")), pyStr);
     }
-    
+
     private static void generateApiMsg(StringBuilder pysb, Class<?> clazz) {
         String actionName = populateActionName(clazz);
         pysb.append(String.format("\n\nclass %s(inventory.%s):", actionName, clazz.getSimpleName()));
@@ -91,7 +104,7 @@ public class PythonApiActionGenerator {
         pysb.append(String.format("\n%sself.out = jsonobject.loads(reply.content)", whiteSpace(8)));
         pysb.append(String.format("\n%sreturn self.out", whiteSpace(8)));
     }
-    
+
     private static void generateQueryMsg(StringBuilder pysb, Class<?> clazz) {
         String actionName = populateActionName(clazz);
         pysb.append(String.format("\n\nclass %s(inventory.%s):", actionName, clazz.getSimpleName()));
@@ -129,7 +142,7 @@ public class PythonApiActionGenerator {
         name = String.format("%sAction", name);
         return WordUtils.capitalize(name);
     }
-    
+
     private static String whiteSpace(int num) {
         return StringUtils.repeat(" ", num);
     }

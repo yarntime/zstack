@@ -8,29 +8,30 @@ import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.MessageSafe;
 import org.zstack.core.componentloader.PluginRegistry;
-import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.DbEntityLister;
-import org.zstack.core.db.SimpleQuery;
+import org.zstack.core.db.*;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.apimediator.ApiMessageInterceptionException;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.AbstractService;
+import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
-import org.zstack.header.identity.IdentityErrors;
-import org.zstack.header.identity.Quota;
-import org.zstack.header.identity.Quota.CheckQuotaForApiMessage;
+import org.zstack.header.identity.*;
+import org.zstack.header.identity.Quota.QuotaOperator;
 import org.zstack.header.identity.Quota.QuotaPair;
-import org.zstack.header.identity.ReportQuotaExtensionPoint;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
+import org.zstack.header.message.NeedQuotaCheckMessage;
 import org.zstack.header.network.l2.L2NetworkVO;
 import org.zstack.header.network.l2.L2NetworkVO_;
 import org.zstack.header.network.l3.*;
 import org.zstack.identity.AccountManager;
+import org.zstack.identity.QuotaUtil;
+import org.zstack.network.service.MtuGetter;
+import org.zstack.network.service.NetworkServiceSystemTag;
 import org.zstack.search.GetQuery;
 import org.zstack.search.SearchQuery;
+import org.zstack.tag.SystemTagCreator;
 import org.zstack.tag.TagManager;
 import org.zstack.utils.ObjectUtils;
 import org.zstack.utils.Utils;
@@ -43,8 +44,11 @@ import java.util.*;
 import java.util.concurrent.Callable;
 
 import static org.zstack.utils.CollectionDSL.list;
+import static org.zstack.utils.CollectionDSL.map;
+import static org.zstack.utils.CollectionDSL.e;
 
-public class L3NetworkManagerImpl extends AbstractService implements L3NetworkManager, ReportQuotaExtensionPoint {
+public class L3NetworkManagerImpl extends AbstractService implements L3NetworkManager, ReportQuotaExtensionPoint,
+        ResourceOwnerPreChangeExtensionPoint {
     private static final CLogger logger = Utils.getLogger(L3NetworkManagerImpl.class);
 
     @Autowired
@@ -95,12 +99,16 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
             handle((APICreateL3NetworkMsg) msg);
         } else if (msg instanceof APIListL3NetworkMsg) {
             handle((APIListL3NetworkMsg) msg);
+        } else if (msg instanceof APISetL3NetworkMtuMsg) {
+            handle((APISetL3NetworkMtuMsg) msg);
+        } else if (msg instanceof APIGetL3NetworkMtuMsg) {
+            handle((APIGetL3NetworkMtuMsg) msg);
         } else if (msg instanceof L3NetworkMessage) {
             passThrough((L3NetworkMessage) msg);
         } else if (msg instanceof APIListIpRangeMsg) {
             handle((APIListIpRangeMsg) msg);
         } else if (msg instanceof APISearchL3NetworkMsg) {
-        	handle((APISearchL3NetworkMsg) msg);
+            handle((APISearchL3NetworkMsg) msg);
         } else if (msg instanceof APIGetL3NetworkMsg) {
             handle((APIGetL3NetworkMsg) msg);
         } else if (msg instanceof APIGetL3NetworkTypesMsg) {
@@ -110,6 +118,31 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
         } else {
             bus.dealWithUnknownMessage(msg);
         }
+    }
+
+    private void handle(final APISetL3NetworkMtuMsg msg) {
+        final APISetL3NetworkMtuEvent evt = new APISetL3NetworkMtuEvent(msg.getId());
+
+        NetworkServiceSystemTag.L3_MTU.delete(msg.getL3NetworkUuid());
+        SystemTagCreator creator = NetworkServiceSystemTag.L3_MTU.newSystemTagCreator(msg.getL3NetworkUuid());
+        creator.ignoreIfExisting = true;
+        creator.inherent = false;
+        creator.setTagByTokens(
+                map(
+                        e(NetworkServiceSystemTag.MTU_TOKEN, msg.getMtu()),
+                        e(NetworkServiceSystemTag.L3_UUID_TOKEN, msg.getL3NetworkUuid())
+                )
+        );
+        creator.create();
+
+        bus.publish(evt);
+    }
+
+    private void handle(final APIGetL3NetworkMtuMsg msg) {
+        APIGetL3NetworkMtuReply reply = new APIGetL3NetworkMtuReply();
+
+        reply.setMtu(new MtuGetter().getMtu(msg.getL3NetworkUuid()));
+        bus.reply(msg, reply);
     }
 
     private void handle(final APIGetIpAddressCapacityMsg msg) {
@@ -198,27 +231,27 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
     private void handle(APIGetL3NetworkMsg msg) {
         GetQuery q = new GetQuery();
         String res = q.getAsString(msg, L3NetworkInventory.class);
-        APIGetL3NetworkReply reply  = new APIGetL3NetworkReply();
+        APIGetL3NetworkReply reply = new APIGetL3NetworkReply();
         reply.setInventory(res);
         bus.reply(msg, reply);
     }
 
     private void handle(APISearchL3NetworkMsg msg) {
-    	SearchQuery<L3NetworkInventory> sq = SearchQuery.create(msg, L3NetworkInventory.class);
-    	String content = sq.listAsString();
-    	APISearchL3NetworkReply reply = new APISearchL3NetworkReply();
-    	reply.setContent(content);
-    	bus.reply(msg, reply);
-	}
+        SearchQuery<L3NetworkInventory> sq = SearchQuery.create(msg, L3NetworkInventory.class);
+        String content = sq.listAsString();
+        APISearchL3NetworkReply reply = new APISearchL3NetworkReply();
+        reply.setContent(content);
+        bus.reply(msg, reply);
+    }
 
-	private void handle(APIListIpRangeMsg msg) {
+    private void handle(APIListIpRangeMsg msg) {
         List<IpRangeVO> vos = dl.listByApiMessage(msg, IpRangeVO.class);
         List<IpRangeInventory> invs = IpRangeInventory.valueOf(vos);
         APIListIpRangeReply reply = new APIListIpRangeReply();
         reply.setInventories(invs);
         bus.reply(msg, reply);
     }
-    
+
     private void passThrough(String l3NetworkUuid, Message msg) {
         L3NetworkVO vo = dbf.findByUuid(l3NetworkUuid, L3NetworkVO.class);
         if (vo == null && allowedMessageAfterSoftDeletion.contains(msg.getClass())) {
@@ -256,7 +289,7 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
         query.add(L2NetworkVO_.uuid, Op.EQ, msg.getL2NetworkUuid());
         String zoneUuid = query.findValue();
         assert zoneUuid != null;
-        
+
         L3NetworkVO vo = new L3NetworkVO();
         if (msg.getResourceUuid() != null) {
             vo.setUuid(msg.getResourceUuid());
@@ -270,13 +303,18 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
         vo.setSystem(msg.isSystem());
         vo.setZoneUuid(zoneUuid);
         vo.setState(L3NetworkState.Enabled);
-        
 
         L3NetworkFactory factory = getL3NetworkFactory(L3NetworkType.valueOf(msg.getType()));
-        L3NetworkInventory inv = factory.createL3Network(vo, msg);
+        L3NetworkInventory inv = new SQLBatchWithReturn<L3NetworkInventory>() {
+            @Override
+            protected L3NetworkInventory scripts() {
+                L3NetworkInventory inv = factory.createL3Network(vo, msg);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), L3NetworkVO.class);
+                tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), L3NetworkVO.class.getSimpleName());
+                return inv;
+            }
+        }.execute();
 
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), L3NetworkVO.class);
-        tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), L3NetworkVO.class.getSimpleName());
 
         APICreateL3NetworkEvent evt = new APICreateL3NetworkEvent(msg.getId());
         evt.setInventory(inv);
@@ -288,7 +326,7 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
     public String getId() {
         return bus.makeLocalServiceId(L3NetworkConstant.SERVICE_ID);
     }
-    
+
     @Override
     public boolean start() {
         populateExtensions();
@@ -307,7 +345,7 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
 
         for (IpAllocatorStrategy f : pluginRgty.getExtensionList(IpAllocatorStrategy.class)) {
             IpAllocatorStrategy old = ipAllocatorStrategies.get(f.getType().toString());
-            if (old != null)  {
+            if (old != null) {
                 throw new CloudRuntimeException(String.format("duplicate IpAllocatorStrategy[%s, %s] for type[%s]", f.getClass().getName(),
                         old.getClass().getName(), f.getType()));
             }
@@ -331,7 +369,7 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
     }
 
     @Override
-    public IpAllocatorStrategy getIpAllocatorStrategy(IpAllocatorType type) {
+    public IpAllocatorStrategy  getIpAllocatorStrategy(IpAllocatorType type) {
         IpAllocatorStrategy factory = ipAllocatorStrategies.get(type.toString());
         if (factory == null) {
             throw new CloudRuntimeException(String.format("Cannot find IpAllocatorStrategy for type(%s)", type));
@@ -355,13 +393,16 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
             return UsedIpInventory.valueOf(vo);
         } catch (JpaSystemException e) {
             if (e.getRootCause() instanceof MySQLIntegrityConstraintViolationException) {
-                logger.debug(String.format("Concurrent ip allocation. Ip[%s] in ip range[uuid:%s] has been allocated, try allocating another one. The error[Duplicate entry] printed by jdbc.spi.SqlExceptionHelper is no harm, we will try finding another ip", ip, ipRange.getUuid()));
+                logger.debug(String.format("Concurrent ip allocation. " +
+                        "Ip[%s] in ip range[uuid:%s] has been allocated, try allocating another one. " +
+                        "The error[Duplicate entry] printed by jdbc.spi.SqlExceptionHelper is no harm, " +
+                        "we will try finding another ip", ip, ipRange.getUuid()));
                 logger.trace("", e);
             } else {
                 throw e;
             }
         }
-        
+
         return null;
     }
 
@@ -374,37 +415,57 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
         return used >= total;
     }
 
-	@Override
-	public List<Long> getUsedIpInRange(String ipRangeUuid) {
+    @Override
+    public List<Long> getUsedIpInRange(String ipRangeUuid) {
         SimpleQuery<UsedIpVO> query = dbf.createQuery(UsedIpVO.class);
         query.select(UsedIpVO_.ipInLong);
         query.add(UsedIpVO_.ipRangeUuid, Op.EQ, ipRangeUuid);
         List<Long> used = query.listValue();
         Collections.sort(used);
-		return used;
-	}
+        return used;
+    }
 
     @Override
     public List<Quota> reportQuota() {
-        CheckQuotaForApiMessage checker = new CheckQuotaForApiMessage() {
+        QuotaOperator checker = new QuotaOperator() {
             @Override
             public void checkQuota(APIMessage msg, Map<String, QuotaPair> pairs) {
-                if (msg instanceof APICreateL3NetworkMsg) {
-                    check((APICreateL3NetworkMsg)msg, pairs);
+                if (!new QuotaUtil().isAdminAccount(msg.getSession().getAccountUuid())) {
+                    if (msg instanceof APICreateL3NetworkMsg) {
+                        check((APICreateL3NetworkMsg) msg, pairs);
+                    }
                 }
             }
 
-            @Transactional(readOnly = true)
-            private void check(APICreateL3NetworkMsg msg, Map<String, QuotaPair> pairs) {
-                long l3Num = pairs.get(L3NetworkConstant.QUOTA_L3_NUM).getValue();
+            @Override
+            public void checkQuota(NeedQuotaCheckMessage msg, Map<String, QuotaPair> pairs) {
 
+            }
+
+            @Override
+            public List<Quota.QuotaUsage> getQuotaUsageByAccount(String accountUuid) {
+                Quota.QuotaUsage usage = new Quota.QuotaUsage();
+                usage.setName(L3NetworkConstant.QUOTA_L3_NUM);
+                usage.setUsed(getUsedL3(accountUuid));
+                return list(usage);
+            }
+
+            @Transactional(readOnly = true)
+            private long getUsedL3(String accountUuid) {
                 String sql = "select count(l3) from L3NetworkVO l3, AccountResourceRefVO ref where l3.uuid = ref.resourceUuid and " +
                         "ref.accountUuid = :auuid and ref.resourceType = :rtype";
                 TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
-                q.setParameter("auuid", msg.getSession().getAccountUuid());
+                q.setParameter("auuid", accountUuid);
                 q.setParameter("rtype", L3NetworkVO.class.getSimpleName());
                 Long l3n = q.getSingleResult();
                 l3n = l3n == null ? 0 : l3n;
+                return l3n;
+            }
+
+            private void check(APICreateL3NetworkMsg msg, Map<String, QuotaPair> pairs) {
+                long l3Num = pairs.get(L3NetworkConstant.QUOTA_L3_NUM).getValue();
+                long l3n = getUsedL3(msg.getSession().getAccountUuid());
+
                 if (l3n + 1 > l3Num) {
                     throw new ApiMessageInterceptionException(errf.instantiateErrorCode(IdentityErrors.QUOTA_EXCEEDING,
                             String.format("quota exceeding.  The account[uuid: %s] exceeds a quota[name: %s, value: %s]",
@@ -415,8 +476,8 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
         };
 
         Quota quota = new Quota();
-        quota.setChecker(checker);
-        quota.setMessageNeedValidation(APICreateL3NetworkMsg.class);
+        quota.setOperator(checker);
+        quota.addMessageNeedValidation(APICreateL3NetworkMsg.class);
 
         QuotaPair p = new QuotaPair();
         p.setName(L3NetworkConstant.QUOTA_L3_NUM);
@@ -425,4 +486,10 @@ public class L3NetworkManagerImpl extends AbstractService implements L3NetworkMa
 
         return list(quota);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void resourceOwnerPreChange(AccountResourceRefInventory ref, String newOwnerUuid) {
+    }
+
 }

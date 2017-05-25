@@ -8,6 +8,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.host.HostInventory;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmNicInventory;
+import org.zstack.header.vm.VmNicVO;
 import org.zstack.network.securitygroup.SecurityGroupInventory;
 import org.zstack.network.securitygroup.SecurityGroupRuleInventory;
 import org.zstack.network.securitygroup.SecurityGroupRuleTO;
@@ -26,16 +27,11 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 
  * @author frank
- * 
- * @condition
- * 1. create vm with sg rules
+ * @condition 1. create vm with sg rules
  * 2. migrate vm to another host
  * 3. make vm migration fail
- *
- * @test
- * confirm rules on vm on previous host are recovered
+ * @test confirm rules on vm on previous host are recovered
  * confirm rules on dest host are cleaned up
  */
 public class TestSecurityGroupRulesForVmMigration1 {
@@ -59,7 +55,7 @@ public class TestSecurityGroupRulesForVmMigration1 {
         sbkd = loader.getComponent(SimulatorSecurityGroupBackend.class);
         config = loader.getComponent(SimulatorConfig.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         HostInventory host2 = deployer.hosts.get("host2");
@@ -69,7 +65,8 @@ public class TestSecurityGroupRulesForVmMigration1 {
         api.addVmNicToSecurityGroup(scinv.getUuid(), vm1Nic.getUuid());
         TimeUnit.MILLISECONDS.sleep(500);
 
-        SecurityGroupRuleTO vmto = sbkd.getRulesOnHost(vm1.getHostUuid(), vm1Nic.getInternalName());
+        String nicname = dbf.findByUuid(vm1Nic.getUuid(), VmNicVO.class).getInternalName();
+        SecurityGroupRuleTO vmto = sbkd.getRulesOnHost(vm1.getHostUuid(), nicname);
         List<SecurityGroupRuleInventory> expectedRules = new ArrayList<SecurityGroupRuleInventory>();
         expectedRules.addAll(scinv.getRules());
         SecurityGroupTestValidator.validate(vmto, expectedRules);
@@ -82,10 +79,10 @@ public class TestSecurityGroupRulesForVmMigration1 {
 
         TimeUnit.MILLISECONDS.sleep(1000);
 
-        vmto = sbkd.getRulesOnHost(vm1.getHostUuid(), vm1Nic.getInternalName());
+        vmto = sbkd.getRulesOnHost(vm1.getHostUuid(), nicname);
         SecurityGroupTestValidator.validate(vmto, expectedRules);
 
-        vmto = sbkd.getRulesOnHost(host2.getUuid(), vm1Nic.getInternalName());
+        vmto = sbkd.getRulesOnHost(host2.getUuid(), nicname);
         Assert.assertNull(vmto);
     }
 }

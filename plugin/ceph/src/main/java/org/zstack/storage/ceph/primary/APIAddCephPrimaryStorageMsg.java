@@ -1,11 +1,15 @@
 package org.zstack.storage.ceph.primary;
 
-import org.zstack.header.message.APIParam;
-import org.zstack.header.message.OverriddenApiParam;
-import org.zstack.header.message.OverriddenApiParams;
+import org.springframework.http.HttpMethod;
+import org.zstack.header.message.*;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
+import org.zstack.header.storage.primary.APIAddPrimaryStorageEvent;
 import org.zstack.header.storage.primary.APIAddPrimaryStorageMsg;
+import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.storage.ceph.CephConstants;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -14,8 +18,14 @@ import java.util.List;
 @OverriddenApiParams({
         @OverriddenApiParam(field = "url", param = @APIParam(maxLength = 2048, required = false))
 })
+@RestRequest(
+        path = "/primary-storage/ceph",
+        method = HttpMethod.POST,
+        responseClass = APIAddPrimaryStorageEvent.class,
+        parameterName = "params"
+)
 public class APIAddCephPrimaryStorageMsg extends APIAddPrimaryStorageMsg {
-    @APIParam(nonempty = false)
+    @APIParam(nonempty = false, emptyString = false)
     private List<String> monUrls;
     @APIParam(required = false, maxLength = 255)
     private String rootVolumePoolName;
@@ -63,5 +73,31 @@ public class APIAddCephPrimaryStorageMsg extends APIAddPrimaryStorageMsg {
 
     public void setMonUrls(List<String> monUrls) {
         this.monUrls = monUrls;
+    }
+ 
+    public static APIAddCephPrimaryStorageMsg __example__() {
+        APIAddCephPrimaryStorageMsg msg = new APIAddCephPrimaryStorageMsg();
+
+        msg.setName("My Ceph Primary Storage");
+        msg.setMonUrls(Collections.singletonList("root:password@localhost/?monPort=7777"));
+        msg.setRootVolumePoolName("zs-images");
+        msg.setDataVolumePoolName("zs-data-volume");
+        msg.setImageCachePoolName("zs-image-cache");
+        msg.setZoneUuid(uuid());
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Added").resource(((APIAddPrimaryStorageEvent)evt).getInventory().getUuid(), PrimaryStorageVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
     }
 }

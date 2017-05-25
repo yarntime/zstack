@@ -1,15 +1,26 @@
 package org.zstack.network.service.virtualrouter;
 
+import org.springframework.http.HttpMethod;
+import org.zstack.header.configuration.APICreateInstanceOfferingEvent;
 import org.zstack.header.configuration.APICreateInstanceOfferingMsg;
-import org.zstack.header.configuration.ConfigurationConstant;
+import org.zstack.header.configuration.InstanceOfferingVO;
 import org.zstack.header.identity.Action;
 import org.zstack.header.image.ImageVO;
 import org.zstack.header.message.APIParam;
 import org.zstack.header.network.l3.L3NetworkVO;
-import org.zstack.header.tag.TagConstant;
+import org.zstack.header.rest.RestRequest;
+import org.zstack.header.tag.TagResourceType;
+import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.zone.ZoneVO;
 
 @Action(category = VirtualRouterConstant.ACTION_CATEGORY)
+@TagResourceType(InstanceOfferingVO.class)
+@RestRequest(
+		path = "/instance-offerings/virtual-routers",
+		responseClass = APICreateInstanceOfferingEvent.class,
+		parameterName = "params",
+		method = HttpMethod.POST
+)
 public class APICreateVirtualRouterOfferingMsg extends APICreateInstanceOfferingMsg {
 	@APIParam(resourceType = ZoneVO.class)
 	private String zoneUuid;
@@ -58,4 +69,22 @@ public class APICreateVirtualRouterOfferingMsg extends APICreateInstanceOffering
 	public void setImageUuid(String imageUuid) {
 		this.imageUuid = imageUuid;
 	}
+ 
+    public static APICreateVirtualRouterOfferingMsg __example__() {
+        APICreateVirtualRouterOfferingMsg msg = new APICreateVirtualRouterOfferingMsg();
+
+		msg.setName("VirtualRouter-Offering");
+		msg.setType(VirtualRouterConstant.VIRTUAL_ROUTER_VM_TYPE);
+		msg.setCpuNum(2);
+		msg.setCpuSpeed(1);
+		msg.setMemorySize(1024);
+        msg.setZoneUuid(uuid());
+        msg.setManagementNetworkUuid(uuid());
+        msg.setImageUuid(uuid());
+        msg.setPublicNetworkUuid(uuid());
+        msg.setDefault(true);
+
+        return msg;
+    }
+
 }

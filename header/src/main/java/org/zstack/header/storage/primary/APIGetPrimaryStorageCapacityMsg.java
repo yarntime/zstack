@@ -1,14 +1,22 @@
 package org.zstack.header.storage.primary;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.cluster.ClusterVO;
 import org.zstack.header.message.APIParam;
 import org.zstack.header.message.APISyncCallMessage;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.zone.ZoneVO;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
  */
+@RestRequest(
+        path = "/primary-storage/capacities",
+        method = HttpMethod.GET,
+        responseClass = APIGetPrimaryStorageCapacityReply.class
+)
 public class APIGetPrimaryStorageCapacityMsg extends APISyncCallMessage {
     @APIParam(required = false, resourceType = ZoneVO.class)
     private List<String> zoneUuids;
@@ -49,4 +57,13 @@ public class APIGetPrimaryStorageCapacityMsg extends APISyncCallMessage {
     public void setAll(boolean all) {
         this.all = all;
     }
+ 
+    public static APIGetPrimaryStorageCapacityMsg __example__() {
+        APIGetPrimaryStorageCapacityMsg msg = new APIGetPrimaryStorageCapacityMsg();
+
+        msg.setPrimaryStorageUuids(Collections.singletonList(uuid()));
+
+        return msg;
+    }
+
 }

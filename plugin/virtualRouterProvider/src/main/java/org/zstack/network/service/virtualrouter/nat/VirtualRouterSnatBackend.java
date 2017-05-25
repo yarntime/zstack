@@ -3,16 +3,13 @@ package org.zstack.network.service.virtualrouter.nat;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
-import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
-import org.zstack.header.identity.AccountResourceRefVO;
-import org.zstack.header.identity.AccountResourceRefVO_;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.network.service.NetworkServiceProviderType;
@@ -31,6 +28,8 @@ import org.zstack.utils.function.Function;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -41,17 +40,15 @@ import java.util.List;
  * Time: 10:37 PM
  * To change this template use File | Settings | File Templates.
  */
-public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
+public class VirtualRouterSnatBackend extends AbstractVirtualRouterBackend implements NetworkServiceSnatBackend {
     private static final CLogger logger = Utils.getLogger(VirtualRouterSnatBackend.class);
 
-    @Autowired
-    private VirtualRouterManager vrMgr;
     @Autowired
     private ErrorFacade errf;
     @Autowired
     private CloudBus bus;
     @Autowired
-    private DatabaseFacade dbf;
+    private ApiTimeoutManager apiTimeoutManager;
 
     @Override
     public NetworkServiceProviderType getProviderType() {
@@ -67,15 +64,19 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
         final SnatStruct struct = it.next();
         final L3NetworkInventory guestL3 = struct.getL3Network();
 
-        vrMgr.acquireVirtualRouterVm(struct.getL3Network(), new VirtualRouterOfferingValidator() {
+        VirtualRouterStruct s = new VirtualRouterStruct();
+        s.setL3Network(guestL3);
+        s.setOfferingValidator(new VirtualRouterOfferingValidator() {
             @Override
             public void validate(VirtualRouterOfferingInventory offering) throws OperationFailureException {
                 if (offering.getPublicNetworkUuid().equals(guestL3.getUuid())) {
-                    throw new OperationFailureException(errf.stringToOperationError(String.format("guest l3Network[uuid:%s, name:%s] needs SNAT service provided by virtual router, but public l3Network[uuid:%s] of virtual router offering[uuid: %s, name:%s] is the same to this guest l3Network",
-                            guestL3.getUuid(), guestL3.getName(), offering.getPublicNetworkUuid(), offering.getUuid(), offering.getName())));
+                    throw new OperationFailureException(operr("guest l3Network[uuid:%s, name:%s] needs SNAT service provided by virtual router, but public l3Network[uuid:%s] of virtual router offering[uuid: %s, name:%s] is the same to this guest l3Network",
+                            guestL3.getUuid(), guestL3.getName(), offering.getPublicNetworkUuid(), offering.getUuid(), offering.getName()));
                 }
             }
-        }, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
+        });
+
+        acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
             @Override
             public void success(final VirtualRouterVmInventory vr) {
                 final VirtualRouterCommands.SNATInfo info = new VirtualRouterCommands.SNATInfo();
@@ -104,6 +105,7 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
                 msg.setVmInstanceUuid(vr.getUuid());
                 msg.setPath(VirtualRouterConstant.VR_SET_SNAT_PATH);
                 msg.setCommand(cmd);
+                msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
                 msg.setCheckStatus(true);
                 bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
                 bus.send(msg, new CloudBusCallBack(completion) {
@@ -119,12 +121,10 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
                         if (!ret.isSuccess()) {
                             new VirtualRouterRoleManager().makeSnatRole(vr.getUuid());
 
-                            String err = String.format(
-                                    "virtual router[uuid:%s, ip:%s] failed to apply snat[%s] for vm[uuid:%s, name:%s] on L3Network[uuid:%s, name:%s], because %s",
+                            ErrorCode err = operr("virtual router[uuid:%s, ip:%s] failed to apply snat[%s] for vm[uuid:%s, name:%s] on L3Network[uuid:%s, name:%s], because %s",
                                     vr.getUuid(), vr.getManagementNic().getIp(), JSONObjectUtil.toJsonString(info), spec.getVmInventory().getUuid(), spec.getVmInventory().getName(),
                                     struct.getL3Network().getUuid(), struct.getL3Network().getName(), ret.getError());
-                            logger.warn(err);
-                            completion.fail(errf.stringToOperationError(err));
+                            completion.fail(err);
                         } else {
                             applySnat(it, spec, completion);
                         }
@@ -183,6 +183,7 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
         msg.setCheckStatus(true);
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setPath(VirtualRouterConstant.VR_REMOVE_SNAT_PATH);
         bus.makeTargetServiceIdByResourceUuid(msg, VirtualRouterConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -191,7 +192,7 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
                 if (!reply.isSuccess()) {
                     logger.warn(String.format("failed to release snat[%s] on virtual router[name:%s, uuid:%s] for vm[uuid: %s, name: %s], %s",
                             struct, vr.getName(), vr.getUuid(), spec.getVmInventory().getUuid(), spec.getVmInventory().getName(), reply.getError()));
-                    //TODO: schedule a job to clean up
+                    //TODO GC
                 } else {
                     VirtualRouterAsyncHttpCallReply re = reply.castReply();
                     RemoveSNATRsp ret = re.toResponse(RemoveSNATRsp.class);
@@ -201,7 +202,7 @@ public class VirtualRouterSnatBackend implements NetworkServiceSnatBackend {
                                 vr.getUuid(), vr.getManagementNic().getIp(), JSONObjectUtil.toJsonString(info), spec.getVmInventory().getUuid(), spec.getVmInventory().getName(),
                                 struct.getL3Network().getUuid(), struct.getL3Network().getName(), ret.getError());
                         logger.warn(err);
-                        //TODO: schedule a job to clean up
+                        //TODO GC
                     } else {
                         String msg = String.format(
                                 "virtual router[uuid:%s, ip:%s] released snat[%s] for vm[uuid:%s, name:%s] on L3Network[uuid:%s, name:%s], because %s",

@@ -1,7 +1,6 @@
 package org.zstack.test.configuration;
 
 import junit.framework.Assert;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
@@ -12,10 +11,7 @@ import org.zstack.header.identity.IdentityErrors;
 import org.zstack.header.identity.PolicyInventory.Statement;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.query.QueryCondition;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.test.identity.IdentityCreator;
 import org.zstack.test.image.TestAddImage;
 import org.zstack.utils.Utils;
@@ -23,29 +19,28 @@ import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
 
 /**
  * 1. create a user
  * 2. assign permissions of allow of creating/deleting/changing/updating instance offering and disk offering to the user
- *
+ * <p>
  * confirm the user can create/delete/change/update the instance offering and disk offering
- *
+ * <p>
  * 3. assign permissions of deny of creating/deleting/changing/updating instance offering and disk offering to the user
- *
+ * <p>
  * confirm the user can not create/delete/change/update the instance offering and disk offering
- *
+ * <p>
  * 4. create a group
  * 5. create another user
  * 6. add the user to the group
  * 7. assign permissions of allow of creating/deleting/changing/updating instance offering and disk offering to the group
- *
+ * <p>
  * confirm the group can create/delete/change/update the instance offering and disk offering
- *
+ * <p>
  * 7. assign permissions of deny of creating/deleting/changing/updating instance offering and disk offering to the group
- *
+ * <p>
  * confirm the group cannot create/delete/change/update the instance offering and disk offering
- *
+ * <p>
  * confirm the user can query the instance offering and disk offering
  */
 public class TestPolicyForConfiguration {
@@ -57,7 +52,7 @@ public class TestPolicyForConfiguration {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml")
                 .addXml("ConfigurationManager.xml").addXml("HostAllocatorManager.xml").addXml("AccountManager.xml").build();

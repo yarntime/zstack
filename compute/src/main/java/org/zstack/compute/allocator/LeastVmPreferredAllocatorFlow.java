@@ -7,31 +7,29 @@ import org.springframework.transaction.annotation.Transactional;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.allocator.AbstractHostAllocatorFlow;
 import org.zstack.header.host.HostVO;
-import org.zstack.utils.CollectionDSL;
-import org.zstack.utils.CollectionUtils;
-import org.zstack.utils.function.Function;
+import org.zstack.utils.Utils;
+import org.zstack.utils.logging.CLogger;
 
 import javax.persistence.Tuple;
 import javax.persistence.TypedQuery;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
+ * This flow returns a list of host candidates sorted by the number of their VMs.
  */
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class LeastVmPreferredAllocatorFlow extends AbstractHostAllocatorFlow {
+    private static final CLogger logger = Utils.getLogger(LeastVmPreferredAllocatorFlow.class);
     @Autowired
     private DatabaseFacade dbf;
 
-    class VmNumHost {
-        long vmNum;
-        String hostUuid;
-    }
-
     @Transactional(readOnly = true)
     private List<Tuple> findLeastVmHost(List<String> huuids) {
-        String sql = "select count(vm), host.uuid from VmInstanceVO vm, HostVO host where vm.hostUuid = host.uuid and host.uuid in (:huuids) group by host.uuid";
+        String sql = "select count(vm) as cnt, host.uuid" +
+                " from HostVO host" +
+                " Left Join VmInstanceVO vm on host.uuid = vm.hostUuid" +
+                " where host.uuid in (:huuids)" +
+                " group by host.uuid order by cnt";
         TypedQuery<Tuple> q = dbf.getEntityManager().createQuery(sql, Tuple.class);
         q.setParameter("huuids", huuids);
         return q.getResultList();
@@ -41,53 +39,47 @@ public class LeastVmPreferredAllocatorFlow extends AbstractHostAllocatorFlow {
     public void allocate() {
         throwExceptionIfIAmTheFirstFlow();
 
+        if (spec.isListAllHosts()) {
+            next(candidates);
+            return;
+        }
+
         List<String> huuids = getHostUuidsFromCandidates();
         List<Tuple> tuples = findLeastVmHost(huuids);
 
-        // no VM running on host
+        // no VM running on any candidate host(s)
         if (tuples.isEmpty()) {
             next(candidates);
             return;
         }
 
-        // for host not having vm running, put vm number to zero
-        Map<String, VmNumHost> mp = new HashMap<String, VmNumHost>();
+        List<HostVO> sorted = new ArrayList<>(candidates.size());
+
+        Map<String, HostVO> dict = new HashMap<>();
+        for (HostVO hvo: candidates) {
+            dict.put(hvo.getUuid(), hvo);
+        }
+
+        if (huuids.size() > tuples.size()) {
+            HashSet<String> hostsWithVMs = new HashSet<>();
+            for (Tuple t : tuples) {
+                String hostUuid = t.get(1, String.class);
+                hostsWithVMs.add(hostUuid);
+            }
+
+            for (String huuid : huuids) {
+                if (!hostsWithVMs.contains(huuid)) {
+                    sorted.add(dict.get(huuid));
+                }
+            }
+        }
+
+        // Note: the query result is ordered.
         for (Tuple t : tuples) {
-            long num = t.get(0, Long.class);
             String hostUuid = t.get(1, String.class);
-            VmNumHost vh = new VmNumHost();
-            vh.vmNum = num;
-            vh.hostUuid = hostUuid;
-            mp.put(hostUuid, vh);
+            sorted.add(dict.get(hostUuid));
         }
 
-        for (String huuid : huuids) {
-            VmNumHost vh = mp.get(huuid);
-            if (vh == null) {
-                vh = new VmNumHost();
-                vh.hostUuid = huuid;
-                vh.vmNum = 0;
-                mp.put(huuid, vh);
-            }
-        }
-
-        long max = Integer.MAX_VALUE;
-        String huuid = null;
-        for (VmNumHost vh : mp.values()) {
-            if (vh.vmNum < max) {
-                huuid = vh.hostUuid;
-                max = vh.vmNum;
-            }
-        }
-
-        final String finalHuuid = huuid;
-        HostVO target = CollectionUtils.find(candidates, new Function<HostVO, HostVO>() {
-            @Override
-            public HostVO call(HostVO arg) {
-                return arg.getUuid().equals(finalHuuid) ? arg : null;
-            }
-        });
-
-        next(CollectionDSL.list(target));
+        next(sorted);
     }
 }

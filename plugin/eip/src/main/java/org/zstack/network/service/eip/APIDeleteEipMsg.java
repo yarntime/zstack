@@ -1,9 +1,13 @@
 package org.zstack.network.service.eip;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APIDeleteMessage;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * @api
@@ -44,6 +48,11 @@ import org.zstack.header.message.APIParam;
  * see :ref:`APIDetachEipEvent`
  */
 @Action(category = EipConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/eips/{uuid}",
+        method = HttpMethod.DELETE,
+        responseClass = APIDeleteEipEvent.class
+)
 public class APIDeleteEipMsg extends APIDeleteMessage implements EipMessage {
     /**
      * @desc eip uuid
@@ -63,4 +72,25 @@ public class APIDeleteEipMsg extends APIDeleteMessage implements EipMessage {
     public String getEipUuid() {
         return uuid;
     }
+ 
+    public static APIDeleteEipMsg __example__() {
+        APIDeleteEipMsg msg = new APIDeleteEipMsg();
+
+        msg.setUuid(uuid());
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                ntfy("Deleted").resource(uuid, EipVO.class.getSimpleName())
+                        .messageAndEvent(that, evt).done();
+            }
+        };
+    }
+
 }

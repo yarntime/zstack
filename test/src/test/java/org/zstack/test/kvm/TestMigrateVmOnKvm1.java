@@ -48,10 +48,10 @@ public class TestMigrateVmOnKvm1 {
         config = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test(expected = ApiSenderException.class)
-	public void test() throws ApiSenderException {
-	    final VmInstanceInventory vm = deployer.vms.get("TestVm");
+
+    @Test(expected = ApiSenderException.class)
+    public void test() throws ApiSenderException {
+        final VmInstanceInventory vm = deployer.vms.get("TestVm");
         HostInventory target = CollectionUtils.find(deployer.hosts.values(), new Function<HostInventory, HostInventory>() {
             @Override
             public HostInventory call(HostInventory arg) {
@@ -64,14 +64,18 @@ public class TestMigrateVmOnKvm1 {
 
         config.checkVlanBridgeSuccess = false;
         try {
-             api.migrateVmInstance(vm.getUuid(), target.getUuid());
+            api.migrateVmInstance(vm.getUuid(), target.getUuid());
         } catch (ApiSenderException e) {
             HostCapacityVO cvo = dbf.findByUuid(vm.getHostUuid(), HostCapacityVO.class);
             Assert.assertTrue(0 != cvo.getUsedCpu());
             Assert.assertTrue(0 != cvo.getUsedMemory());
             VmInstanceVO vo = dbf.findByUuid(vm.getUuid(), VmInstanceVO.class);
             Assert.assertEquals(VmInstanceState.Running, vo.getState());
+
+            HostCapacityVO tvo = dbf.findByUuid(target.getUuid(), HostCapacityVO.class);
+            Assert.assertEquals(tvo.getTotalCpu(), tvo.getAvailableCpu());
+            Assert.assertEquals(tvo.getTotalMemory(), tvo.getAvailableMemory());
             throw e;
         }
-	}
+    }
 }

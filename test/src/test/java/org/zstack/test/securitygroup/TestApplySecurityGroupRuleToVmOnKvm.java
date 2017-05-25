@@ -4,27 +4,28 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.Q;
 import org.zstack.header.vm.VmInstanceInventory;
+import org.zstack.header.vm.VmNicVO;
+import org.zstack.header.vm.VmNicVO_;
 import org.zstack.network.securitygroup.SecurityGroupInventory;
 import org.zstack.network.securitygroup.SecurityGroupRuleTO;
+import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+
 /**
- * 
  * @author frank
- * 
- * @condition
- * 1. create a security group
+ * @condition 1. create a security group
  * 2. add some rules
  * 3. create a vm
  * 4. add one nic of vm to security group
@@ -55,8 +56,9 @@ public class TestApplySecurityGroupRuleToVmOnKvm {
         SecurityGroupInventory scinv = deployer.securityGroups.get("test");
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         List<String> nicNames = new ArrayList<String>();
-        String nicName = vm.getVmNics().get(0).getInternalName();
-        nicNames.add(vm.getVmNics().get(0).getInternalName());
+        String nicUuid = vm.getVmNics().get(0).getUuid();
+        String nicName = Q.New(VmNicVO.class).select(VmNicVO_.internalName).eq(VmNicVO_.uuid, nicUuid).findValue();
+        nicNames.add(nicName);
 
         List<String> nicUuids = new ArrayList<String>();
         nicUuids.add(vm.getVmNics().get(0).getUuid());

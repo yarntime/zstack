@@ -9,25 +9,32 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.configuration.InstanceOfferingInventory;
 import org.zstack.header.image.ImageInventory;
-import org.zstack.header.network.l3.L3Network;
 import org.zstack.header.network.l3.L3NetworkInventory;
-import org.zstack.header.vm.*;
-import org.zstack.header.volume.VolumeInventory;
-import org.zstack.header.volume.VolumeType;
-import org.zstack.header.volume.VolumeVO;
+import org.zstack.header.vm.VmInstanceInventory;
+import org.zstack.header.vm.VmNicInventory;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.VmCreator;
 import org.zstack.test.deployer.Deployer;
 
+import java.util.List;
+
 import static org.zstack.utils.CollectionDSL.e;
 import static org.zstack.utils.CollectionDSL.map;
 
 /**
  * 1 create vm with 3 static IP
- *
+ * <p>
  * confirm three static IP are correctly allocated
+ * <p>
+ * 2. delete l3 network1
+ * <p>
+ * confirm the static ip tag of l3 network1 deleted
+ * <p>
+ * 3. stop/start the vm
+ * <p>
+ * confirm the vm starts/stops successfully
  */
 public class TestVmStaticIp {
     Deployer deployer;
@@ -46,7 +53,7 @@ public class TestVmStaticIp {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         InstanceOfferingInventory ioinv = deployer.instanceOfferings.get("TestInstanceOffering");
@@ -89,5 +96,16 @@ public class TestVmStaticIp {
                 Assert.assertEquals(l3Ip3, nic.getIp());
             }
         }
+
+        api.deleteL3Network(l31.getUuid());
+        List<String> tags = VmSystemTags.STATIC_IP.getTags(vm.getUuid());
+        for (String t : tags) {
+            if (t.contains(l3Ip1)) {
+                Assert.fail("static ip tag is still on l3 network1");
+            }
+        }
+
+        api.stopVmInstance(vm.getUuid());
+        api.startVmInstance(vm.getUuid());
     }
 }

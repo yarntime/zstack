@@ -1,24 +1,40 @@
 package org.zstack.kvm;
 
 import org.zstack.header.host.HostMessage;
+import org.zstack.header.message.CarrierMessage;
 import org.zstack.header.message.NeedReplyMessage;
 import org.zstack.utils.gson.JSONObjectUtil;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  */
-public class KVMHostAsyncHttpCallMsg extends NeedReplyMessage implements HostMessage {
+public class KVMHostAsyncHttpCallMsg extends NeedReplyMessage implements HostMessage, CarrierMessage {
     private String path;
     private String command;
     private String hostUuid;
     private boolean noStatusCheck;
-    private int commandTimeout = 300;
+    private long commandTimeout = -1;
+    private String commandClassName;
 
-    public int getCommandTimeout() {
+    public String getCommandClassName() {
+        return commandClassName;
+    }
+
+    @Override
+    public long getTimeout() {
+        return getCommandTimeout() + TimeUnit.SECONDS.toMillis(30);
+    }
+
+    public long getCommandTimeout() {
+        assert commandTimeout != -1 : "commandTimeout is not set";
+        assert commandTimeout != 0 : "commandTimeout cannot be 0";
         return commandTimeout;
     }
 
-    public void setCommandTimeout(int commandTimeout) {
+    public void setCommandTimeout(long commandTimeout) {
         this.commandTimeout = commandTimeout;
+        timeout = getTimeout();
     }
 
     public boolean isNoStatusCheck() {
@@ -43,6 +59,7 @@ public class KVMHostAsyncHttpCallMsg extends NeedReplyMessage implements HostMes
 
     public void setCommand(Object command) {
         this.command = JSONObjectUtil.toJsonString(command);
+        commandClassName = command.getClass().getName();
     }
 
     @Override

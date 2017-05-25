@@ -5,24 +5,29 @@ import org.zstack.core.CoreGlobalProperty;
 import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.*;
 import org.zstack.core.componentloader.PluginRegistry;
+import org.zstack.core.config.GlobalConfig;
+import org.zstack.core.config.GlobalConfigUpdateExtensionPoint;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.DbEntityLister;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
+import org.zstack.core.defer.Deferred;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.safeguard.Guard;
 import org.zstack.core.thread.AsyncThread;
 import org.zstack.core.thread.SyncThread;
-import org.zstack.core.workflow.*;
+import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.header.AbstractService;
+import org.zstack.header.allocator.HostCpuOverProvisioningManager;
 import org.zstack.header.cluster.ClusterVO;
 import org.zstack.header.cluster.ClusterVO_;
 import org.zstack.header.core.Completion;
+import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.host.*;
 import org.zstack.header.managementnode.ManagementNodeChangeListener;
+import org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
 import org.zstack.header.message.MessageReply;
@@ -31,14 +36,19 @@ import org.zstack.search.GetQuery;
 import org.zstack.search.SearchQuery;
 import org.zstack.tag.TagManager;
 import org.zstack.utils.Bucket;
+import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.ObjectUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.function.ForEachFunction;
 import org.zstack.utils.logging.CLogger;
 
 import javax.persistence.Tuple;
 import java.util.*;
 
-public class HostManagerImpl extends AbstractService implements HostManager, ManagementNodeChangeListener {
+import static org.zstack.core.Platform.operr;
+
+public class HostManagerImpl extends AbstractService implements HostManager, ManagementNodeChangeListener,
+        ManagementNodeReadyExtensionPoint {
     private static final CLogger logger = Utils.getLogger(HostManagerImpl.class);
 
     @Autowired
@@ -59,9 +69,13 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
     protected HostTracker tracker;
     @Autowired
     private TagManager tagMgr;
+    @Autowired
+    private HostCpuOverProvisioningManager cpuRatioMgr;
+
+    private Map<Class, HostBaseExtensionFactory> hostBaseExtensionFactories = new HashMap<>();
+
 
     private Map<String, HypervisorFactory> hypervisorFactories = Collections.synchronizedMap(new HashMap<String, HypervisorFactory>());
-    private Map<String, HostMessageHandlerExtensionPoint> msgHandlers = Collections.synchronizedMap(new HashMap<String, HostMessageHandlerExtensionPoint>());
     private static final Set<Class> allowedMessageAfterSoftDeletion = new HashSet<Class>();
 
     static {
@@ -150,15 +164,24 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
     private void handleLocalMessage(Message msg) {
         if (msg instanceof HostMessage) {
             passThrough((HostMessage) msg);
+        } else if (msg instanceof AddHostMsg){
+            handle((AddHostMsg) msg);
         } else {
             bus.dealWithUnknownMessage(msg);
         }
     }
 
-    @Guard
-    private void handle(APIAddHostMsg msg) {
-        final APIAddHostEvent evt = new APIAddHostEvent(msg.getId());
+    private AddHostMsg getAddHostMsg(AddHostMessage msg) {
+        if (msg instanceof AddHostMsg) {
+            return (AddHostMsg) msg;
+        } else if (msg instanceof APIAddHostMsg) {
+            return AddHostMsg.valueOf((APIAddHostMsg) msg);
+        }
 
+        throw new CloudRuntimeException("unexpected addHost message: " + msg);
+    }
+
+    private void doAddHost(final AddHostMessage msg, ReturnValueCompletion<HostInventory > completion) {
         final ClusterVO cluster = findClusterByUuid(msg.getClusterUuid());
         final HostVO hvo = new HostVO();
         if (msg.getResourceUuid() != null) {
@@ -177,8 +200,11 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
 
         final HypervisorFactory factory = getHypervisorFactory(HypervisorType.valueOf(cluster.getHypervisorType()));
         final HostVO vo = factory.createHost(hvo, msg);
+        final AddHostMsg amsg = getAddHostMsg(msg);
 
-        tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), HostVO.class.getSimpleName());
+        if (msg instanceof APIAddHostMsg) {
+            tagMgr.createTagsFromAPICreateMessage((APIAddHostMsg)msg, vo.getUuid(), HostVO.class.getSimpleName());
+        }
 
         FlowChain chain = FlowChainBuilder.newSimpleFlowChain();
         final HostInventory inv = HostInventory.valueOf(vo);
@@ -186,12 +212,17 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
         chain.then(new NoRollbackFlow() {
             String __name__ = "call-before-add-host-extension";
 
-            @Override
-            public void run(final FlowTrigger trigger, Map data) {
-                extEmitter.beforeAddHost(inv, new Completion(trigger) {
+            private void callPlugins(final Iterator<HostAddExtensionPoint> it, final FlowTrigger trigger) {
+                if (!it.hasNext()) {
+                    trigger.next();
+                    return;
+                }
+
+                HostAddExtensionPoint ext = it.next();
+                ext.beforeAddHost(inv, new Completion(trigger) {
                     @Override
                     public void success() {
-                        trigger.next();
+                        callPlugins(it, trigger);
                     }
 
                     @Override
@@ -200,6 +231,13 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
                     }
                 });
             }
+
+            @Override
+            public void run(final FlowTrigger trigger, Map data) {
+                List<HostAddExtensionPoint> exts = pluginRgty.getExtensionList(HostAddExtensionPoint.class);
+                callPlugins(exts.iterator(), trigger);
+            }
+
         }).then(new NoRollbackFlow() {
             String __name__ = "send-connect-host-message";
 
@@ -230,7 +268,7 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
                 String version = HostSystemTags.OS_VERSION.getTokenByResourceUuid(vo.getUuid(), HostSystemTags.OS_VERSION_TOKEN);
 
                 if (distro == null && release == null && version == null) {
-                    trigger.fail(errf.stringToOperationError(String.format("after connecting, host[name:%s, ip:%s] returns a null os version", vo.getName(), vo.getManagementIp())));
+                    trigger.fail(operr("after connecting, host[name:%s, ip:%s] returns a null os version", vo.getName(), vo.getManagementIp()));
                     return;
                 }
 
@@ -238,6 +276,7 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
                 q.select(HostVO_.uuid);
                 q.add(HostVO_.clusterUuid, Op.EQ, vo.getClusterUuid());
                 q.add(HostVO_.uuid, Op.NOT_EQ, vo.getUuid());
+                q.add(HostVO_.status, Op.NOT_EQ, HostStatus.Connecting);
                 q.setLimit(1);
                 List<String> huuids = q.listValue();
                 if (huuids.isEmpty()) {
@@ -256,12 +295,20 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
                     return;
                 }
 
+                if (version.contains(".")) {
+                    version = version.split("\\.")[0];
+                }
+
+                if (cversion.contains(".")) {
+                    cversion = cversion.split("\\.")[0];
+                }
+
                 String mineVersion = String.format("%s;%s;%s", distro, release, version);
                 String currentVersion = String.format("%s;%s;%s", cdistro, crelease, cversion);
 
                 if (!mineVersion.equals(currentVersion)) {
-                    trigger.fail(errf.stringToOperationError(String.format("cluster[uuid:%s] already has host with os version[%s], but new added host[name:%s ip:%s] has host os version[%s]",
-                            vo.getClusterUuid(), currentVersion, vo.getName(), vo.getManagementIp(), mineVersion)));
+                    trigger.fail(operr("cluster[uuid:%s] already has host with os version[%s], but new added host[name:%s ip:%s] has host os version[%s]",
+                            vo.getClusterUuid(), currentVersion, vo.getName(), vo.getManagementIp(), mineVersion));
                     return;
                 }
 
@@ -284,23 +331,75 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
                     }
                 });
             }
-        }).done(new FlowDoneHandler(msg) {
+        }).done(new FlowDoneHandler(amsg) {
             @Override
             public void handle(Map data) {
-                HostInventory inv = factory.getHostInventory(vo.getUuid());
+                HostVO nvo = dbf.reload(vo);
+                HostInventory inv = factory.getHostInventory(nvo.getUuid());
                 inv.setStatus(HostStatus.Connected.toString());
-                evt.setInventory(inv);
-                bus.publish(evt);
+                completion.success(inv);
+
                 logger.debug(String.format("successfully added host[name:%s, hypervisor:%s, uuid:%s]", vo.getName(), vo.getHypervisorType(), vo.getUuid()));
             }
-        }).error(new FlowErrorHandler(msg) {
+        }).error(new FlowErrorHandler(amsg) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
-                evt.setErrorCode(errf.instantiateErrorCode(HostErrors.UNABLE_TO_ADD_HOST, errCode));
-                bus.publish(evt);
-                dbf.remove(vo);
+                // delete host totally through the database, so other tables
+                // refer to the host table will clean up themselves
+                HostVO nvo = dbf.reload(vo);
+                dbf.remove(nvo);
+                dbf.eoCleanup(HostVO.class);
+                HostInventory inv = HostInventory.valueOf(nvo);
+
+                CollectionUtils.safeForEach(pluginRgty.getExtensionList(FailToAddHostExtensionPoint.class), new ForEachFunction<FailToAddHostExtensionPoint>() {
+                    @Override
+                    public void run(FailToAddHostExtensionPoint ext) {
+                        ext.failedToAddHost(inv, msg);
+                    }
+                });
+
+                completion.fail(errf.instantiateErrorCode(HostErrors.UNABLE_TO_ADD_HOST, errCode));
             }
         }).start();
+
+    }
+
+    @Deferred
+    private void handle(final AddHostMsg msg) {
+        final AddHostReply reply = new AddHostReply();
+
+        doAddHost(msg, new ReturnValueCompletion<HostInventory>(msg) {
+            @Override
+            public void success(HostInventory returnValue) {
+                reply.setInventory(returnValue);
+                bus.reply(msg, reply);
+            }
+
+            @Override
+            public void fail(ErrorCode errorCode) {
+                reply.setError(errorCode);
+                bus.reply(msg, reply);
+            }
+        });
+    }
+
+    @Deferred
+    private void handle(final APIAddHostMsg msg) {
+        final APIAddHostEvent evt = new APIAddHostEvent(msg.getId());
+
+        doAddHost(msg, new ReturnValueCompletion<HostInventory>(msg) {
+            @Override
+            public void success(HostInventory inventory) {
+                evt.setInventory(inventory);
+                bus.publish(evt);
+            }
+
+            @Override
+            public void fail(ErrorCode errorCode) {
+                evt.setError(errorCode);
+                bus.publish(evt);
+            }
+        });
     }
 
     private ClusterVO findClusterByUuid(String uuid) {
@@ -324,26 +423,33 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
             hypervisorFactories.put(f.getHypervisorType().toString(), f);
         }
 
-        for (HostMessageHandlerExtensionPoint handler : pluginRgty.getExtensionList(HostMessageHandlerExtensionPoint.class)) {
-            assert handler.getMessageNameTheExtensionServed() != null;
-            @SuppressWarnings("unchecked")
-            List<String> msgNames = handler.getMessageNameTheExtensionServed();
-            for (String msgName : msgNames) {
-                @SuppressWarnings("rawtypes")
-                HostMessageHandlerExtensionPoint old = msgHandlers.get(msgName);
+        for (HostBaseExtensionFactory ext : pluginRgty.getExtensionList(HostBaseExtensionFactory.class)) {
+            for (Class clz : ext.getMessageClasses()) {
+                HostBaseExtensionFactory old = hostBaseExtensionFactories.get(clz);
                 if (old != null) {
-                    throw new CloudRuntimeException(String.format("Duplicate handler[%s, %s] found for message[%s], old one is %s, new one is %s", old.getClass().getName(), handler
-                            .getClass().getName(), msgName, old.getClass().getName(), handler.getClass().getName()));
+                    throw new CloudRuntimeException(String.format("duplicate HostBaseExtensionFactory[%s, %s] for the" +
+                            " message[%s]", old.getClass(), ext.getClass(), clz));
                 }
-                msgHandlers.put(msgName, handler);
+                hostBaseExtensionFactories.put(clz, ext);
             }
         }
+
     }
 
     @Override
     public boolean start() {
+        setupGlobalConfig();
         populateExtensions();
         return true;
+    }
+
+    private void setupGlobalConfig() {
+        HostGlobalConfig.HOST_CPU_OVER_PROVISIONING_RATIO.installLocalUpdateExtension(new GlobalConfigUpdateExtensionPoint() {
+            @Override
+            public void updateGlobalConfig(GlobalConfig oldConfig, GlobalConfig newConfig) {
+                cpuRatioMgr.setGlobalRatio(newConfig.value(Integer.class));
+            }
+        });
     }
 
     @Override
@@ -369,11 +475,11 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
     private Bucket getHostManagedByUs() {
         int qun = 10000;
         long amount = dbf.count(HostVO.class);
-        int times = (int)(amount / qun) + (amount % qun != 0 ? 1 : 0);
+        int times = (int) (amount / qun) + (amount % qun != 0 ? 1 : 0);
         List<String> connected = new ArrayList<String>();
         List<String> disconnected = new ArrayList<String>();
         int start = 0;
-        for (int i=0; i<times; i++) {
+        for (int i = 0; i < times; i++) {
             SimpleQuery<HostVO> q = dbf.createQuery(HostVO.class);
             q.select(HostVO_.uuid, HostVO_.status);
             q.setLimit(qun);
@@ -409,8 +515,13 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
             hostsToLoad.addAll(connected);
             hostsToLoad.addAll(disconnected);
         } else {
-            hostsToLoad.addAll(disconnected);
-            tracker.trackHost(connected);
+            if (HostGlobalConfig.RECONNECT_ALL_ON_BOOT.value(Boolean.class)) {
+                hostsToLoad.addAll(connected);
+                hostsToLoad.addAll(disconnected);
+            } else {
+                hostsToLoad.addAll(disconnected);
+                tracker.trackHost(connected);
+            }
         }
 
         if (hostsToLoad.isEmpty()) {
@@ -427,7 +538,8 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
             msgs.add(connectMsg);
         }
 
-        bus.send(msgs, HostGlobalConfig.HOST_LOAD_PARALLELISM_DEGREE.value(Integer.class), new CloudBusSteppingCallback() {
+        bus.send(msgs, HostGlobalConfig.HOST_LOAD_PARALLELISM_DEGREE.value(Integer.class),
+                new CloudBusSteppingCallback(null) {
             @Override
             public void run(NeedReplyMessage msg, MessageReply reply) {
                 ConnectHostMsg cmsg = (ConnectHostMsg) msg;
@@ -441,10 +553,7 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
     }
 
     @Override
-    @AsyncThread
     public void iJoin(String nodeId) {
-        logger.debug(String.format("Management node[uuid:%s] joins, start loading host...", nodeId));
-        loadHost();
     }
 
 
@@ -458,7 +567,14 @@ public class HostManagerImpl extends AbstractService implements HostManager, Man
     }
 
     @Override
-    public HostMessageHandlerExtensionPoint getHostMessageHandlerExtension(Message msg) {
-        return msgHandlers.get(msg.getMessageName());
+    @AsyncThread
+    public void managementNodeReady() {
+        logger.debug(String.format("Management node[uuid:%s] joins, start loading host...", Platform.getManagementServerId()));
+        loadHost();
+    }
+
+    @Override
+    public HostBaseExtensionFactory getHostBaseExtensionFactory(Message msg) {
+        return hostBaseExtensionFactories.get(msg.getClass());
     }
 }

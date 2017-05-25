@@ -13,6 +13,10 @@ import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.identity.*;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.tag.*;
+import org.zstack.identity.QuotaUtil;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.TypedQuery;
 
@@ -51,9 +55,7 @@ public class TagApiInterceptor implements ApiMessageInterceptor {
 
     private void validate(APICreateTagMsg msg) {
         if (!tagMgr.getManagedEntityNames().contains(msg.getResourceType())) {
-            throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                    String.format("no resource type[%s] found in tag system", msg.getResourceType())
-            ));
+            throw new ApiMessageInterceptionException(argerr("no resource type[%s] found in tag system", msg.getResourceType()));
         }
 
         if (msg instanceof APICreateSystemTagMsg) {
@@ -62,6 +64,7 @@ public class TagApiInterceptor implements ApiMessageInterceptor {
             } catch (OperationFailureException oe) {
                 throw new ApiMessageInterceptionException(oe.getErrorCode());
             }
+            checkIfResourceHasThisTagType(msg.getResourceUuid(), msg.getResourceType());
         }
     }
 
@@ -70,14 +73,12 @@ public class TagApiInterceptor implements ApiMessageInterceptor {
         q.add(SystemTagVO_.uuid, Op.EQ, msg.getUuid());
         q.add(SystemTagVO_.inherent, Op.EQ, true);
         if (q.isExists()) {
-            throw new ApiMessageInterceptionException(errf.stringToOperationError(
-                    String.format("tag[uuid:%s] is an inherent system tag, can not be removed", msg.getUuid())
-            ));
+            throw new ApiMessageInterceptionException(operr("tag[uuid:%s] is an inherent system tag, can not be removed", msg.getUuid()));
         }
 
         boolean userTag = dbf.isExist(msg.getUuid(), UserTagVO.class);
         boolean sysTag = dbf.isExist(msg.getUuid(), SystemTagVO.class);
-        if (!isAdminAccount(msg.getSession().getAccountUuid())) {
+        if (!new QuotaUtil().isAdminAccount(msg.getSession().getAccountUuid())) {
             if (userTag) {
                 checkAccountForUserTag(msg);
             } else if (sysTag) {
@@ -86,17 +87,26 @@ public class TagApiInterceptor implements ApiMessageInterceptor {
         }
     }
 
-    private boolean isAdminAccount(String accountUuid) {
-        SimpleQuery<AccountVO> q = dbf.createQuery(AccountVO.class);
-        q.select(AccountVO_.type);
-        q.add(AccountVO_.uuid, Op.EQ, accountUuid);
-        AccountType type = q.findValue();
-        return type == AccountType.SystemAdmin;
+    @Transactional(readOnly = true)
+    private void checkIfResourceHasThisTagType(String resourceUuid, String resourceType) {
+        String sql = String.format("select count(vo.uuid) from %s vo where " +
+                " vo.uuid = :resourceUuid", resourceType);
+        TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
+        q.setParameter("resourceUuid", resourceUuid);
+
+        Long size = q.getSingleResult();
+        if (size <= 0) {
+            throw new ApiMessageInterceptionException(argerr("The argument :'resourceType' doesn't match uuid"));
+        }
+
     }
 
     @Transactional(readOnly = true)
     private void checkAccountForSystemTag(APIDeleteTagMsg msg) {
-        String sql = "select ref.accountUuid from SystemTagVO tag, AccountResourceRefVO ref where tag.resourceUuid = ref.resourceUuid and tag.uuid = :tuuid";
+        String sql = "select ref.accountUuid" +
+                " from SystemTagVO tag, AccountResourceRefVO ref" +
+                " where tag.resourceUuid = ref.resourceUuid" +
+                " and tag.uuid = :tuuid";
         TypedQuery<String> q = dbf.getEntityManager().createQuery(sql, String.class);
         q.setParameter("tuuid", msg.getUuid());
         String accountUuid = q.getSingleResult();

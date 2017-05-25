@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="180">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm1"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm2"/>
@@ -48,6 +48,8 @@
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm45"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm46"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm47"/>
+    <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm48"/>
+    <TestCase class="org.zstack.test.storage.snapshot.TestSnapshotOnKvm49"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestQuerySnapshot"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestQuerySnapshot1"/>
     <TestCase class="org.zstack.test.storage.snapshot.TestGetSnapshotTree"/>

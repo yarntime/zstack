@@ -7,22 +7,30 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.Component;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.GlobalApiMessageInterceptor;
+import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.storage.backup.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.argerr;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class SftpBackupStorageFactory implements BackupStorageFactory, GlobalApiMessageInterceptor, Component {
     private static final CLogger logger = Utils.getLogger(SftpBackupStorageFactory.class);
-    public static BackupStorageType type = new BackupStorageType(SftpBackupStorageConstant.SFTP_BACKUP_STORAGE_TYPE, BackupStorageConstant.SCHEME_HTTP,
-            BackupStorageConstant.SCHEME_HTTPS, BackupStorageConstant.SCHEME_NFS);
+    public static BackupStorageType type = new BackupStorageType(
+            SftpBackupStorageConstant.SFTP_BACKUP_STORAGE_TYPE,
+            BackupStorageConstant.SCHEME_HTTP,
+            BackupStorageConstant.SCHEME_HTTPS,
+            BackupStorageConstant.SCHEME_NFS,
+            BackupStorageConstant.SCHEME_FILE
+    );
 
     @Autowired
     private DatabaseFacade dbf;
@@ -30,6 +38,10 @@ public class SftpBackupStorageFactory implements BackupStorageFactory, GlobalApi
     private AnsibleFacade asf;
     @Autowired
     private ErrorFacade errf;
+
+    static {
+        type.setOrder(999);
+    }
 
     @Override
     public BackupStorageType getBackupStorageType() {
@@ -43,6 +55,7 @@ public class SftpBackupStorageFactory implements BackupStorageFactory, GlobalApi
         lvo.setHostname(amsg.getHostname());
         lvo.setUsername(amsg.getUsername());
         lvo.setPassword(amsg.getPassword());
+        lvo.setSshPort(amsg.getSshPort());
         dbf.persist(lvo);
         return SftpBackupStorageInventory.valueOf(lvo);
     }
@@ -66,8 +79,8 @@ public class SftpBackupStorageFactory implements BackupStorageFactory, GlobalApi
                 APIAddSftpBackupStorageMsg amsg = (APIAddSftpBackupStorageMsg) msg;
                 String url = amsg.getUrl();
                 if (!url.startsWith("/")) {
-                    String err = String.format("invalid url[%s], the url must be an absolute path starting with '/'", amsg.getUrl());
-                    throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR, err));
+                    ErrorCode err = argerr("invalid url[%s], the url must be an absolute path starting with '/'", amsg.getUrl());
+                    throw new ApiMessageInterceptionException(err);
                 }
 
                 String hostname = amsg.getHostname();
@@ -75,8 +88,8 @@ public class SftpBackupStorageFactory implements BackupStorageFactory, GlobalApi
                 query.add(SftpBackupStorageVO_.hostname, Op.EQ, hostname);
                 long count = query.count();
                 if (count != 0) {
-                    String err = String.format("existing SimpleHttpBackupStorage with hostname[%s] found", hostname);
-                    throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR, err));
+                    ErrorCode err = argerr("existing SimpleHttpBackupStorage with hostname[%s] found", hostname);
+                    throw new ApiMessageInterceptionException(err);
                 }
             }
         }

@@ -1,12 +1,10 @@
 package org.zstack.header.allocator;
 
 import org.zstack.header.configuration.DiskOfferingInventory;
-import org.zstack.header.configuration.InstanceOfferingInventory;
 import org.zstack.header.host.HypervisorType;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.volume.VolumeFormat;
-import org.zstack.utils.DebugUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,8 +24,54 @@ public class HostAllocatorSpec {
     private VmInstanceInventory vmInstance;
     private ImageInventory image;
     private String vmOperation;
-    private List<DiskOfferingInventory> diskOfferings;
-    private Map<Object, Object> extraData = new HashMap<Object, Object>();
+    private List<DiskOfferingInventory> diskOfferings = new ArrayList<>();
+    private Map<Object, Object> extraData = new HashMap<>();
+    private boolean allowNoL3Networks;
+    private boolean listAllHosts;
+    private String requiredBackupStorageUuid;
+    private String requiredPrimaryStorageUuid;
+    private Map<String, List<String>> backupStoragePrimaryStorageMetrics;
+    private boolean dryRun;
+
+    public String getRequiredPrimaryStorageUuid() {
+        return requiredPrimaryStorageUuid;
+    }
+
+    public void setRequiredPrimaryStorageUuid(String requiredPrimaryStorageUuid) {
+        this.requiredPrimaryStorageUuid = requiredPrimaryStorageUuid;
+    }
+
+    public boolean isDryRun() {
+        return dryRun;
+    }
+
+    public void setDryRun(boolean dryRun) {
+        this.dryRun = dryRun;
+    }
+
+    public String getRequiredBackupStorageUuid() {
+        return requiredBackupStorageUuid;
+    }
+
+    public void setRequiredBackupStorageUuid(String requiredBackupStorageUuid) {
+        this.requiredBackupStorageUuid = requiredBackupStorageUuid;
+    }
+
+    public boolean isListAllHosts() {
+        return listAllHosts;
+    }
+
+    public void setListAllHosts(boolean listAllHosts) {
+        this.listAllHosts = listAllHosts;
+    }
+
+    public boolean isAllowNoL3Networks() {
+        return allowNoL3Networks;
+    }
+
+    public void setAllowNoL3Networks(boolean allowNoL3Networks) {
+        this.allowNoL3Networks = allowNoL3Networks;
+    }
 
     public List<DiskOfferingInventory> getDiskOfferings() {
         return diskOfferings;
@@ -47,7 +91,7 @@ public class HostAllocatorSpec {
 
     public List<String> getAvoidHostUuids() {
         if (avoidHostUuids == null) {
-            avoidHostUuids = new ArrayList<String>();
+            avoidHostUuids = new ArrayList<>();
         }
         return avoidHostUuids;
     }
@@ -74,7 +118,7 @@ public class HostAllocatorSpec {
 
     public List<String> getL3NetworkUuids() {
         if (l3NetworkUuids == null) {
-            l3NetworkUuids = new ArrayList<String>();
+            l3NetworkUuids = new ArrayList<>();
         }
         return l3NetworkUuids;
     }
@@ -137,8 +181,10 @@ public class HostAllocatorSpec {
         spec.setAvoidHostUuids(msg.getAvoidHostUuids());
         spec.setCpuCapacity(msg.getCpuCapacity());
         spec.setDiskSize(msg.getDiskSize());
+        spec.setListAllHosts(msg.isListAllHosts());
+        spec.setDryRun(msg.isDryRun());
         String hvType = null;
-        if (msg.getVmInstance().getHypervisorType() != null) {
+        if (msg.getVmInstance() != null && msg.getVmInstance().getHypervisorType() != null) {
             hvType = msg.getVmInstance().getHypervisorType();
         }
         if (hvType == null && msg.getImage() != null) {
@@ -154,6 +200,17 @@ public class HostAllocatorSpec {
         spec.setImage(msg.getImage());
         spec.setVmOperation(msg.getVmOperation());
         spec.setDiskOfferings(msg.getDiskOfferings());
+        spec.setAllowNoL3Networks(msg.isAllowNoL3Networks());
+        spec.setRequiredBackupStorageUuid(msg.getRequiredBackupStorageUuid());
+        spec.setRequiredPrimaryStorageUuid(msg.getRequiredPrimaryStorageUuid());
         return spec;
+    }
+
+    public Map<String, List<String>> getBackupStoragePrimaryStorageMetrics() {
+        return backupStoragePrimaryStorageMetrics;
+    }
+
+    public void setBackupStoragePrimaryStorageMetrics(Map<String, List<String>> backupStoragePrimaryStorageMetrics) {
+        this.backupStoragePrimaryStorageMetrics = backupStoragePrimaryStorageMetrics;
     }
 }

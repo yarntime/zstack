@@ -23,7 +23,6 @@ import org.zstack.network.service.virtualrouter.lb.VirtualRouterLoadBalancerBack
 import org.zstack.network.service.virtualrouter.lb.VirtualRouterLoadBalancerBackend.RefreshLbRsp;
 import org.zstack.simulator.AsyncRESTReplyer;
 import org.zstack.simulator.SimulatorGlobalProperty;
-import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
@@ -168,6 +167,7 @@ public class VirtualRouterSimulator {
         replyer.reply(entity, rsp);
     }
 
+    @AsyncThread
     private void doRevokePortForwardingRules(HttpEntity<String> entity) {
         RevokePortForwardingRuleCmd cmd = JSONObjectUtil.toObject(entity.getBody(), RevokePortForwardingRuleCmd.class);
         RevokePortForwardingRuleRsp rsp = new RevokePortForwardingRuleRsp();
@@ -189,6 +189,7 @@ public class VirtualRouterSimulator {
         return null;
     }
 
+    @AsyncThread
     private void doCreateVip(HttpEntity<String> entity) {
         CreateVipCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CreateVipCmd.class);
         CreateVipRsp rsp = new CreateVipRsp();
@@ -212,6 +213,7 @@ public class VirtualRouterSimulator {
         return null;
     }
 
+    @AsyncThread
     private void doRemoveVip(HttpEntity<String> entity) {
         RemoveVipCmd cmd = JSONObjectUtil.toObject(entity.getBody(), RemoveVipCmd.class);
         RemoveVipRsp rsp = new RemoveVipRsp();
@@ -254,6 +256,7 @@ public class VirtualRouterSimulator {
         return null;
     }
 
+    @AsyncThread
     private void doCreatePortForwardingRules(HttpEntity<String> entity) {
         CreatePortForwardingRuleCmd cmd = JSONObjectUtil.toObject(entity.getBody(), CreatePortForwardingRuleCmd.class);
         CreatePortForwardingRuleRsp rsp = new CreatePortForwardingRuleRsp();

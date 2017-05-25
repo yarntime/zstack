@@ -4,15 +4,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.NoErrorCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.service.DhcpStruct;
 import org.zstack.header.network.service.NetworkServiceDhcpBackend;
 import org.zstack.header.network.service.NetworkServiceProviderType;
 import org.zstack.header.vm.VmInstanceConstant;
+import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmInstanceSpec;
 import org.zstack.header.vm.VmNicInventory;
 import org.zstack.network.service.virtualrouter.*;
@@ -23,19 +26,21 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
-public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
+public class VirtualRouterDhcpBackend extends AbstractVirtualRouterBackend implements NetworkServiceDhcpBackend {
     private final CLogger logger = Utils.getLogger(VirtualRouterDhcpBackend.class);
 
     @Autowired
-    private VirtualRouterManager vrMgr;
+    protected ErrorFacade errf;
     @Autowired
-    private ErrorFacade errf;
+    protected CloudBus bus;
     @Autowired
-    private CloudBus bus;
+    protected ApiTimeoutManager apiTimeoutManager;
 
     @Override
     public NetworkServiceProviderType getProviderType() {
@@ -49,7 +54,11 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
         }
 
         final DhcpStruct struct = it.next();
-        vrMgr.acquireVirtualRouterVm(struct.getL3Network(), spec, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
+
+        VirtualRouterStruct s = new VirtualRouterStruct();
+        s.setL3Network(struct.getL3Network());
+
+        acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
             @Override
             public void success(final VirtualRouterVmInventory vr) {
                 VirtualRouterCommands.DhcpInfo e = new VirtualRouterCommands.DhcpInfo();
@@ -61,6 +70,18 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
                 e.setNetmask(struct.getNetmask());
                 e.setDnsDomain(struct.getDnsDomain());
                 e.setHostname(struct.getHostname());
+                e.setMtu(struct.getMtu());
+
+                if (e.isDefaultL3Network()) {
+                    if (e.getHostname() == null) {
+                        e.setHostname(e.getIp().replaceAll("\\.", "-"));
+                    }
+
+                    if (e.getDnsDomain() != null) {
+                        e.setHostname(String.format("%s.%s", e.getHostname(), e.getDnsDomain()));
+                    }
+                }
+
                 VmNicInventory vrNic = CollectionUtils.find(vr.getVmNics(), new Function<VmNicInventory, VmNicInventory>() {
                     @Override
                     public VmNicInventory call(VmNicInventory arg) {
@@ -76,6 +97,7 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
                 cmd.setDhcpEntries(Arrays.asList(e));
                 VirtualRouterAsyncHttpCallMsg cmsg = new VirtualRouterAsyncHttpCallMsg();
                 cmsg.setCommand(cmd);
+                cmsg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
                 cmsg.setPath(VirtualRouterConstant.VR_ADD_DHCP_PATH);
                 cmsg.setVmInstanceUuid(vr.getUuid());
                 cmsg.setCheckStatus(true);
@@ -96,10 +118,9 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
                                     .getIp()));
                             applyDhcpEntry(it, spec, completion);
                         } else {
-                            String err = String.format("unable to add dhcp entries to virtual router vm[uuid:%s ip:%s], because %s, dhcp entry[%s]",
+                            ErrorCode err = operr("unable to add dhcp entries to virtual router vm[uuid:%s ip:%s], because %s, dhcp entry[%s]",
                                     vr.getUuid(), vr.getManagementNic().getIp(), rsp.getError(), struct);
-                            logger.warn(err);
-                            completion.fail(errf.stringToOperationError(err));
+                            completion.fail(err);
                         }
                     }
                 });
@@ -159,6 +180,7 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setPath(VirtualRouterConstant.VR_REMOVE_DHCP_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
             @Override
@@ -166,7 +188,7 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
                 if (!reply.isSuccess()) {
                     logger.warn(String.format("unable to remove dhcp entry[%s] from virtual router vm[uuid:%s, ip:%s], %s", struct, vr.getUuid(), vr
                             .getManagementNic().getIp(), reply.getError()));
-                    //TODO: schedule a job to clean up
+                    //TODO: GC
                 } else {
                     VirtualRouterAsyncHttpCallReply ret = reply.castReply();
                     if (ret.isSuccess()) {
@@ -175,7 +197,7 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
                     } else {
                         logger.warn(String.format("unable to remove dhcp entry[%s] from virtual router vm[uuid:%s, ip:%s], %s", struct, vr.getUuid(), vr
                                 .getManagementNic().getIp(), ret.getError()));
-                        //TODO: schedule a job to clean up
+                        //TODO: GC
                     }
                 }
 
@@ -192,5 +214,10 @@ public class VirtualRouterDhcpBackend implements NetworkServiceDhcpBackend {
         }
 
         releaseDhcp(dhcpStructList.iterator(), spec, completion);
+    }
+
+    @Override
+    public void vmDefaultL3NetworkChanged(VmInstanceInventory vm, String previousL3, String nowL3, Completion completion) {
+        return;
     }
 }

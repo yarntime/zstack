@@ -11,10 +11,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.network.l2.L2NetworkInventory;
 import org.zstack.header.network.l3.*;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.network.NetworkUtils;
 
 public class TestFirstAvailableIpAllocatorStrategy2 {
@@ -26,7 +23,7 @@ public class TestFirstAvailableIpAllocatorStrategy2 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("ZoneManager.xml").addXml("NetworkManager.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
@@ -40,7 +37,7 @@ public class TestFirstAvailableIpAllocatorStrategy2 {
         api.stopServer();
     }
 
-    private void takeIp(L3NetworkInventory l3inv, IpRangeInventory ipinv, String...ips) {
+    private void takeIp(L3NetworkInventory l3inv, IpRangeInventory ipinv, String... ips) {
         for (String ip : ips) {
             UsedIpVO vo = new UsedIpVO(ipinv.getUuid(), ip);
             vo.setUuid(Platform.getUuid());
@@ -49,7 +46,7 @@ public class TestFirstAvailableIpAllocatorStrategy2 {
             dbf.persist(vo);
         }
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         ZoneInventory zone = api.createZones(1).get(0);
@@ -60,9 +57,9 @@ public class TestFirstAvailableIpAllocatorStrategy2 {
         IpRangeInventory ipInv = api.addIpRange(l3inv.getUuid(), "10.223.110.10", "10.223.110.20", "10.223.110.1", "255.255.255.0");
         IpRangeVO ipvo = dbf.findByUuid(ipInv.getUuid(), IpRangeVO.class);
         Assert.assertNotNull(ipvo);
-        
+
         takeIp(l3inv, ipInv, "10.223.110.10", "10.223.110.11", "10.223.110.12", "10.223.110.14");
-        
+
         AllocateIpMsg msg = new AllocateIpMsg();
         msg.setL3NetworkUuid(l3inv.getUuid());
         msg.setServiceId(bus.makeLocalServiceId(L3NetworkConstant.SERVICE_ID));

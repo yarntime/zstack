@@ -2,15 +2,17 @@ package org.zstack.image;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
-import org.zstack.core.cascade.*;
+import org.zstack.core.cascade.AbstractAsyncCascadeExtension;
+import org.zstack.core.cascade.CascadeAction;
+import org.zstack.core.cascade.CascadeConstant;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusListCallBack;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.core.Completion;
 import org.zstack.header.identity.AccountInventory;
 import org.zstack.header.identity.AccountVO;
 import org.zstack.header.image.*;
+import org.zstack.header.image.ImageDeletionPolicyManager.ImageDeletionPolicy;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageVO;
@@ -19,7 +21,6 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
-import javax.persistence.Query;
 import javax.persistence.Tuple;
 import javax.persistence.TypedQuery;
 import java.util.*;
@@ -55,11 +56,9 @@ public class ImageCascadeExtension extends AbstractAsyncCascadeExtension {
         completion.success();
     }
 
-    @Transactional
     private void cleanupImageEO() {
-        String sql = "delete from ImageEO i where i.deleted is not null and i.uuid not in (select vm.imageUuid from VmInstanceVO vm where vm.imageUuid is not null)";
-        Query q = dbf.getEntityManager().createQuery(sql);
-        q.executeUpdate();
+        String sql = "select i.uuid from ImageEO i where i.deleted is not null and i.uuid not in (select vm.imageUuid from VmInstanceVO vm where vm.imageUuid is not null)";
+        dbf.hardDeleteCollectionSelectedBySQL(sql, ImageVO.class);
     }
 
     private void handleDeletion(final CascadeAction action, final Completion completion) {
@@ -77,6 +76,8 @@ public class ImageCascadeExtension extends AbstractAsyncCascadeExtension {
                 if (!arg.getDeleteAll()) {
                     msg.setBackupStorageUuids(arg.getBackupStorageUuids());
                 }
+                ImageDeletionPolicy deletionPolicy = deletionPolicyFromAction(action);
+                msg.setDeletionPolicy(deletionPolicy == null ? null : deletionPolicy.toString());
                 bus.makeTargetServiceIdByResourceUuid(msg, ImageConstant.SERVICE_ID, arg.getImage().getUuid());
                 msg.setForceDelete(action.isActionCode(CascadeConstant.DELETION_FORCE_DELETE_CODE));
                 return msg;
@@ -95,16 +96,6 @@ public class ImageCascadeExtension extends AbstractAsyncCascadeExtension {
                     }
                 }
 
-                List<String> uuids = new ArrayList<String>();
-                for (MessageReply r : replies) {
-                    ImageDeletionStruct struct = structs.get(replies.indexOf(r));
-                    if (struct.getDeleteAll()) {
-                        uuids.add(struct.getImage().getUuid());
-                        logger.debug(String.format("delete image[uuid:%s, name:%s]", struct.getImage().getUuid(), struct.getImage().getName()));
-                    }
-                }
-
-                dbf.removeByPrimaryKeys(uuids, ImageVO.class);
                 completion.success();
             }
         });
@@ -148,6 +139,14 @@ public class ImageCascadeExtension extends AbstractAsyncCascadeExtension {
         List<ImageDeletionStruct> structs = new ArrayList<ImageDeletionStruct>();
         structs.addAll(tmp.values());
         return structs;
+    }
+
+    private ImageDeletionPolicy deletionPolicyFromAction(CascadeAction action) {
+        if (BackupStorageVO.class.getSimpleName().equals(action.getParentIssuer())) {
+            return ImageDeletionPolicy.DeleteReference;
+        } else {
+            return null;
+        }
     }
 
     private List<ImageDeletionStruct> imageFromAction(CascadeAction action) {

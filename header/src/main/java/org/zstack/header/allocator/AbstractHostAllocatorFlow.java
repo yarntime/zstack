@@ -56,6 +56,13 @@ public abstract class AbstractHostAllocatorFlow {
         trigger.next(candidates);
     }
 
+    protected void skip() {
+        if (usePagination()) {
+            paginationInfo.setOffset(paginationInfo.getOffset() + paginationInfo.getLimit());
+        }
+        trigger.skip();
+    }
+
     protected void fail(String reason) {
         if (paginationInfo != null && trigger.indexOfFlow(this) != 0) {
             // in pagination, and a middle flow fails, we can continue
@@ -79,12 +86,13 @@ public abstract class AbstractHostAllocatorFlow {
 
     protected void throwExceptionIfIAmTheFirstFlow() {
         if (candidates == null || candidates.isEmpty()) {
-            throw new CloudRuntimeException(String.format("%s cannot be the first flow in the allocation chain", this.getClass().getName()));
+            throw new CloudRuntimeException(String.format("%s cannot be the first flow in the allocation chain",
+                    this.getClass().getName()));
         }
     }
 
     protected List<String> getHostUuidsFromCandidates() {
-        List<String> huuids = new ArrayList<String>(candidates.size());
+        List<String> huuids = new ArrayList<>(candidates.size());
         for (HostVO vo : candidates) {
             huuids.add(vo.getUuid());
         }

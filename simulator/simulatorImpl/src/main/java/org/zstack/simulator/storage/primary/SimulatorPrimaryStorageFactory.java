@@ -6,6 +6,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.simulator.storage.primary.APIAddSimulatorPrimaryStorageMsg;
 import org.zstack.header.simulator.storage.primary.SimulatorPrimaryStorageConstant;
 import org.zstack.header.storage.primary.*;
+import org.zstack.storage.primary.PrimaryStorageCapacityUpdater;
 import org.zstack.utils.path.PathUtil;
 
 public class SimulatorPrimaryStorageFactory implements PrimaryStorageFactory {
@@ -30,6 +31,8 @@ public class SimulatorPrimaryStorageFactory implements PrimaryStorageFactory {
         cvo.setUuid(vo.getUuid());
         cvo.setAvailableCapacity(smsg.getAvailableCapacity());
         cvo.setTotalCapacity(smsg.getTotalCapacity());
+        cvo.setAvailablePhysicalCapacity(smsg.getAvailablePhysicalCapacity());
+        cvo.setTotalPhysicalCapacity(smsg.getTotalPhysicalCapacity());
         dbf.persist(cvo);
         return PrimaryStorageInventory.valueOf(vo);
     }

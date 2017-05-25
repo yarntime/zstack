@@ -6,11 +6,10 @@ import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.SimpleQuery;
 import org.zstack.header.allocator.APIGetCpuMemoryCapacityReply;
+import org.zstack.header.allocator.HostCpuOverProvisioningManager;
 import org.zstack.header.cluster.ClusterInventory;
 import org.zstack.header.host.HostInventory;
-import org.zstack.header.host.HostVO;
 import org.zstack.header.zone.ZoneInventory;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
@@ -23,13 +22,15 @@ import org.zstack.utils.function.Function;
 import java.util.Arrays;
 import java.util.List;
 
+@Deprecated
 public class TestGetCpuMemoryCapacity {
     Deployer deployer;
-    Api api; 
+    Api api;
     ComponentLoader loader;
     CloudBus bus;
     DatabaseFacade dbf;
-    
+    HostCpuOverProvisioningManager cpuMgr;
+
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
@@ -39,8 +40,9 @@ public class TestGetCpuMemoryCapacity {
         loader = deployer.getComponentLoader();
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
+        cpuMgr = loader.getComponent(HostCpuOverProvisioningManager.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         ZoneInventory zone = api.listZones(null).get(0);
@@ -60,38 +62,29 @@ public class TestGetCpuMemoryCapacity {
                 return arg.getUuid();
             }
         });
-        
-        long totalCpu = 2600 * 8;
+
         long totalMemory = SizeUnit.GIGABYTE.toByte(12);
-        
+
         APIGetCpuMemoryCapacityReply reply = api.retrieveHostCapacity(Arrays.asList(zone.getUuid()), null, null);
-        Assert.assertEquals(totalCpu, reply.getTotalCpu());
         Assert.assertEquals(totalMemory, reply.getTotalMemory());
-        Assert.assertEquals(totalCpu, reply.getAvailableCpu());
         Assert.assertEquals(totalMemory, reply.getAvailableMemory());
-        
+
         reply = api.retrieveHostCapacity(null, Arrays.asList(cluster.getUuid()), null);
-        Assert.assertEquals(totalCpu, reply.getTotalCpu());
         Assert.assertEquals(totalMemory, reply.getTotalMemory());
-        Assert.assertEquals(totalCpu, reply.getAvailableCpu());
         Assert.assertEquals(totalMemory, reply.getAvailableMemory());
-        
+
         reply = api.retrieveHostCapacity(null, null, Arrays.asList(host.getUuid()));
-        Assert.assertEquals(4 * 2600, reply.getTotalCpu());
+        Assert.assertEquals(cpuMgr.calculateByRatio(host.getUuid(), 4), reply.getTotalCpu());
         Assert.assertEquals(SizeUnit.GIGABYTE.toByte(8), reply.getTotalMemory());
-        Assert.assertEquals(4 * 2600, reply.getAvailableCpu());
+        Assert.assertEquals(cpuMgr.calculateByRatio(host.getUuid(), 4), reply.getAvailableCpu());
         Assert.assertEquals(SizeUnit.GIGABYTE.toByte(8), reply.getAvailableMemory());
 
         reply = api.retrieveHostCapacity(null, null, huuids);
-        Assert.assertEquals(totalCpu, reply.getTotalCpu());
         Assert.assertEquals(totalMemory, reply.getTotalMemory());
-        Assert.assertEquals(totalCpu, reply.getAvailableCpu());
         Assert.assertEquals(totalMemory, reply.getAvailableMemory());
 
         reply = api.retrieveHostCapacityByAll();
-        Assert.assertEquals(totalCpu, reply.getTotalCpu());
         Assert.assertEquals(totalMemory, reply.getTotalMemory());
-        Assert.assertEquals(totalCpu, reply.getAvailableCpu());
         Assert.assertEquals(totalMemory, reply.getAvailableMemory());
     }
 }

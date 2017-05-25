@@ -5,7 +5,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.query.QueryOp;
 import org.zstack.header.vm.APIQueryVmNicMsg;
@@ -25,9 +24,7 @@ import org.zstack.utils.logging.CLogger;
 import java.util.List;
 
 /**
- * 
  * @author frank
- * 
  */
 public class TestQueryVmNicInSecurityGroup {
     static CLogger logger = Utils.getLogger(TestQueryVmNicInSecurityGroup.class);
@@ -46,7 +43,7 @@ public class TestQueryVmNicInSecurityGroup {
         loader = deployer.getComponentLoader();
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         VmInstanceInventory vm = deployer.vms.get("TestVm");

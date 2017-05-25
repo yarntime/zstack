@@ -11,10 +11,7 @@ import org.zstack.header.configuration.DiskOfferingInventory;
 import org.zstack.header.volume.VolumeInventory;
 import org.zstack.header.volume.VolumeVO;
 import org.zstack.storage.volume.VolumeGlobalConfig;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
@@ -24,7 +21,7 @@ import org.zstack.utils.logging.CLogger;
  * 2. create a disk offering
  * 3. create a data volume from the disk offering
  * 4. delete the disk offering
- *
+ * <p>
  * confirm the volume's disk offering column is not null
  */
 public class TestDeleteDiskOffering3 {
@@ -37,7 +34,7 @@ public class TestDeleteDiskOffering3 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml").addXml("ZoneManager.xml")
                 .addXml("PrimaryStorageManager.xml").addXml("ConfigurationManager.xml").addXml("VolumeManager.xml").addXml("AccountManager.xml").build();

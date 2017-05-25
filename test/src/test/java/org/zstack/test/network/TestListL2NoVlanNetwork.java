@@ -8,10 +8,7 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.network.l2.L2NetworkInventory;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.function.Function;
@@ -28,7 +25,7 @@ public class TestListL2NoVlanNetwork {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("ZoneManager.xml").addXml("NetworkManager.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
@@ -45,7 +42,7 @@ public class TestListL2NoVlanNetwork {
     public void test() throws ApiSenderException {
         int testNum = 10;
         ZoneInventory zone = api.createZones(1).get(0);
-        for (int i=0; i<testNum; i++) {
+        for (int i = 0; i < testNum; i++) {
             api.createNoVlanL2Network(zone.getUuid(), "eth" + i);
         }
         List<L2NetworkInventory> invs = api.listL2Network(null);
@@ -57,7 +54,7 @@ public class TestListL2NoVlanNetwork {
             }
         });
         invs = api.listL2Network(uuids);
-        for (int i=0; i<testNum; i++) {
+        for (int i = 0; i < testNum; i++) {
             Assert.assertEquals(uuids.get(i), invs.get(i).getUuid());
         }
     }

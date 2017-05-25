@@ -1,7 +1,6 @@
 package org.zstack.utils.path;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang.StringUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -10,7 +9,6 @@ import java.io.FileInputStream;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 public class PathUtil {
@@ -78,6 +76,11 @@ public class PathUtil {
         return f;
     }
 
+    public static boolean exists(String path) {
+        File f = new File(path);
+        return f.exists();
+    }
+
     public static File findFolderOnClassPath(String folderName,  boolean exceptionOnNotFound) {
         File folder = findFolderOnClassPath(folderName);
         if (folder == null && exceptionOnNotFound) {
@@ -143,10 +146,26 @@ public class PathUtil {
 
         try {
             File folder = new File(folderUrl.toURI());
-            String[] files = folder.list();
-            List<String> ret = new ArrayList<String>(files.length);
-            for (String f : files) {
-                ret.add(PathUtil.join(folder.getAbsolutePath(), f));
+            List<String> ret = new ArrayList<>();
+            scanFolder(ret, folder.getAbsolutePath());
+            return ret;
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Unable to locate service portal configure files"), e);
+        }
+    }
+
+    public static List<String> scanFolder(List<String> ret, String folderName) {
+        try {
+            File folder = new File(folderName);
+            if (folder.isDirectory()) {
+                File[] fileArray = folder.listFiles();
+                for(File f: fileArray) {
+                    if (f.isDirectory()) {
+                        scanFolder(ret, f.getAbsolutePath());
+                    } else {
+                        ret.add(PathUtil.join(folder.getAbsolutePath(), f.getName()));
+                    }
+                }
             }
             return ret;
         } catch (Exception e) {

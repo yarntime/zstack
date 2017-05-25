@@ -11,10 +11,7 @@ import org.zstack.header.host.HostInventory;
 import org.zstack.header.host.HostState;
 import org.zstack.header.host.HostStateEvent;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -22,6 +19,7 @@ import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
+
 public class TestChangeHostState {
     CLogger logger = Utils.getLogger(TestChangeHostState.class);
     Api api;
@@ -36,10 +34,15 @@ public class TestChangeHostState {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
-        loader = con.addXml("PortalForUnitTest.xml").addXml("ClusterManager.xml").addXml("ZoneManager.xml")
-                .addXml("HostManager.xml").addXml("Simulator.xml").addXml("AccountManager.xml").build();
+        loader = con.addXml("PortalForUnitTest.xml")
+                .addXml("ClusterManager.xml")
+                .addXml("ZoneManager.xml")
+                .addXml("HostManager.xml")
+                .addXml("Simulator.xml")
+                .addXml("HostAllocatorManager.xml")
+                .addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
         api = new Api();
         api.startServer();
@@ -49,7 +52,7 @@ public class TestChangeHostState {
     void enableHost(HostInventory host) throws InterruptedException, BrokenBarrierException, ApiSenderException {
         barrier.await();
         try {
-            for (int i=0; i<testNum; i++) {
+            for (int i = 0; i < testNum; i++) {
                 HostInventory h = api.changeHostState(host.getUuid(), HostStateEvent.enable);
                 if (!h.getState().equals(HostState.Enabled.toString())) {
                     return;
@@ -65,7 +68,7 @@ public class TestChangeHostState {
     void disableHost(HostInventory host) throws InterruptedException, BrokenBarrierException, ApiSenderException {
         barrier.await();
         try {
-            for (int i=0; i<testNum; i++) {
+            for (int i = 0; i < testNum; i++) {
                 HostInventory h = api.changeHostState(host.getUuid(), HostStateEvent.disable);
                 if (!h.getState().equals(HostState.Disabled.toString())) {
                     return;

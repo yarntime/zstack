@@ -14,7 +14,11 @@
 	<bean id="NfsPrimaryStorageFactory" class="org.zstack.storage.primary.nfs.NfsPrimaryStorageFactory">
 		<zstack:plugin>
 			<zstack:extension interface="org.zstack.header.storage.primary.PrimaryStorageFactory" />
+			<zstack:extension interface="org.zstack.header.storage.snapshot.CreateTemplateFromVolumeSnapshotExtensionPoint" />
+			<zstack:extension interface="org.zstack.header.storage.primary.RecalculatePrimaryStorageCapacityExtensionPoint" />
+			<zstack:extension interface="org.zstack.header.storage.primary.PrimaryStorageDetachExtensionPoint" />
 			<zstack:extension interface="org.zstack.header.Component" />
+			<zstack:extension interface="org.zstack.header.host.HostDeleteExtensionPoint"/>
 		</zstack:plugin>
 	</bean>
 	
@@ -37,6 +41,12 @@
 	<bean id="NfsPrimaryStorageApiInterceptor" class="org.zstack.storage.primary.nfs.NfsPrimaryStorageApiInterceptor">
 		<zstack:plugin>
 			<zstack:extension interface="org.zstack.header.apimediator.ApiMessageInterceptor" />
+		</zstack:plugin>
+	</bean>
+
+	<bean id="NfsPrimaryStorageImageCacheCleaner" class="org.zstack.storage.primary.nfs.NfsPrimaryStorageImageCacheCleaner">
+		<zstack:plugin>
+			<zstack:extension interface="org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint" />
 		</zstack:plugin>
 	</bean>
 </beans>

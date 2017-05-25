@@ -6,17 +6,17 @@
     http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
     http://www.springframework.org/schema/aop
     http://www.springframework.org/schema/aop/spring-aop-3.0.xsd
-    http://www.springframework.org/schema/tx 
+    http://www.springframework.org/schema/tx
     http://www.springframework.org/schema/tx/spring-tx-3.0.xsd
-    http://zstack.org/schema/zstack 
+    http://zstack.org/schema/zstack
     http://zstack.org/schema/zstack/plugin.xsd"
     default-init-method="init" default-destroy-method="destroy">
 
     <bean id="VmInstanceManager" class="org.zstack.compute.vm.VmInstanceManagerImpl">
         <property name="createVmWorkFlowElements">
             <list>
-                <value>org.zstack.compute.vm.VmAllocateHostFlow</value>
                 <value>org.zstack.compute.vm.VmImageSelectBackupStorageFlow</value>
+                <value>org.zstack.compute.vm.VmAllocateHostFlow</value>
                 <value>org.zstack.compute.vm.VmAllocatePrimaryStorageFlow</value>
                 <value>org.zstack.compute.vm.VmAllocateVolumeFlow</value>
                 <value>org.zstack.compute.vm.VmAllocateNicFlow</value>
@@ -34,12 +34,18 @@
         </property>
         <property name="rebootVmWorkFlowElements">
             <list>
-                <value>org.zstack.compute.vm.VmRebootOnHypervisorFlow</value>
+                <value>org.zstack.compute.vm.VmStopOnHypervisorFlow</value>
+                <value>org.zstack.compute.vm.VmReleaseResourceFlow</value>
+                <value>org.zstack.compute.vm.VmImageSelectBackupStorageFlow</value>
+                <value>org.zstack.compute.vm.VmInstantiateResourcePreFlow</value>
+                <value>org.zstack.compute.vm.VmStartOnHypervisorFlow</value>
+                <value>org.zstack.compute.vm.VmInstantiateResourcePostFlow</value>
             </list>
         </property>
         <property name="startVmWorkFlowElements">
             <list>
                 <value>org.zstack.compute.vm.VmAllocateHostForStoppedVmFlow</value>
+                <value>org.zstack.compute.vm.VmImageSelectBackupStorageFlow</value>
                 <value>org.zstack.compute.vm.VmAllocateNicForStartingVmFlow</value>
                 <value>org.zstack.compute.vm.VmInstantiateResourcePreFlow</value>
                 <value>org.zstack.compute.vm.VmStartOnHypervisorFlow</value>
@@ -60,7 +66,7 @@
                 <value>org.zstack.compute.vm.VmDestroyOnHypervisorFlow</value>
                 <value>org.zstack.compute.vm.VmReturnHostFlow</value>
                 <value>org.zstack.compute.vm.VmReleaseResourceFlow</value>
-                <value>org.zstack.compute.vm.VmReturnIpFlow</value>
+                <value>org.zstack.compute.vm.VmReturnReleaseNicFlow</value>
                 <value>org.zstack.compute.vm.VmDeleteVolumeFlow</value>
             </list>
         </property>
@@ -72,12 +78,42 @@
                 <value>org.zstack.compute.vm.VmAttachVolumeOnHypervisorFlow</value>
             </list>
         </property>
+        <property name="attachIsoWorkFlowElements">
+            <list>
+                <value>org.zstack.compute.vm.VmDownloadIsoFlow</value>
+                <value>org.zstack.compute.vm.AttachIsoOnHypervisorFlow</value>
+            </list>
+        </property>
+        <property name="detachIsoWorkFlowElements">
+            <list>
+                <value>org.zstack.compute.vm.DetachIsoOnHypervisorFlow</value>
+            </list>
+        </property>
+        <property name="expungeVmWorkFlowElements">
+            <list>
+                <value>org.zstack.compute.vm.VmExpungeRootVolumeFlow</value>
+            </list>
+        </property>
+        <property name="pauseVmWorkFlowElements">
+            <list>
+                <value>org.zstack.compute.vm.PauseVmOnHypervisorFlow</value>
+            </list>
+        </property>
+        <property name="resumeVmWorkFlowElements">
+            <list>
+                <value>org.zstack.compute.vm.ResumeVmOnHypervisorFlow</value>
+            </list>
+        </property>
 
         <zstack:plugin>
             <zstack:extension interface="org.zstack.header.Component" />
             <zstack:extension interface="org.zstack.header.Service" />
-            <zstack:extension interface="org.zstack.header.host.HostStatusChangeNotifyPoint" />
             <zstack:extension interface="org.zstack.header.identity.ReportQuotaExtensionPoint" />
+            <zstack:extension interface="org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint" />
+            <zstack:extension interface="org.zstack.header.network.l3.L3NetworkDeleteExtensionPoint" />
+            <zstack:extension interface="org.zstack.header.apimediator.GlobalApiMessageInterceptor" />
+            <zstack:extension interface="org.zstack.header.identity.ResourceOwnerAfterChangeExtensionPoint" />
+            <zstack:extension interface="org.zstack.header.host.AfterChangeHostStatusExtensionPoint"/>
         </zstack:plugin>
     </bean>
 
@@ -110,4 +146,7 @@
 			<zstack:extension interface="org.zstack.core.cascade.CascadeExtensionPoint" />
         </zstack:plugin>
     </bean>
+
+    <bean id="VmInstanceDeletionPolicyManager" class="org.zstack.compute.vm.VmInstanceDeletionPolicyManagerImpl" />
+
 </beans>

@@ -11,8 +11,9 @@ import org.zstack.test.deployer.schema.DeployerConfig;
 import org.zstack.test.deployer.schema.PortForwardingConfig;
 
 import java.util.List;
+
 public class DefaultPortForwardingDeployer implements PortForwardingDeployer<PortForwardingConfig> {
-    
+
     @Override
     public Class<PortForwardingConfig> getSupportedDeployerClassType() {
         return PortForwardingConfig.class;
@@ -26,16 +27,16 @@ public class DefaultPortForwardingDeployer implements PortForwardingDeployer<Por
         }
         return null;
     }
-    
+
     @Override
     public void deploy(List<PortForwardingConfig> portForwardingRules, DeployerConfig config, Deployer deployer) throws ApiSenderException {
         for (PortForwardingConfig pf : portForwardingRules) {
             VmInstanceInventory vm = deployer.vms.get(pf.getVmRef());
-            L3NetworkInventory l3 = deployer.l3Networks.get(pf.getPrivateL3NetworkRef());
-            assert l3 != null;
             L3NetworkInventory publicL3 = deployer.l3Networks.get(pf.getPublicL3NetworkRef());
             String vmNicUuid = null;
             if (vm != null) {
+                L3NetworkInventory l3 = deployer.l3Networks.get(pf.getPrivateL3NetworkRef());
+                assert l3 != null;
                 VmNicInventory nic = getVmNicUuidForL3OfVm(l3.getUuid(), vm);
                 assert nic != null;
                 vmNicUuid = nic.getUuid();
@@ -56,7 +57,7 @@ public class DefaultPortForwardingDeployer implements PortForwardingDeployer<Por
 
             SessionInventory session = pf.getAccountRef() == null ? null : deployer.loginByAccountRef(pf.getAccountRef(), config);
 
-            pfinv = deployer.getApi().createPortForwardingRuleByFullConfig(pfinv ,session);
+            pfinv = deployer.getApi().createPortForwardingRuleByFullConfig(pfinv, session);
             deployer.portForwardingRules.put(pfinv.getName(), pfinv);
         }
     }

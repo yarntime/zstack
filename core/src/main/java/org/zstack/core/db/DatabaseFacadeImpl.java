@@ -13,10 +13,11 @@ import org.zstack.core.db.TransactionalCallback.Operation;
 import org.zstack.header.Component;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.APIListMessage;
-import org.zstack.header.vo.EO;
-import org.zstack.header.vo.SoftDeletionCascade;
-import org.zstack.header.vo.SoftDeletionCascades;
-import org.zstack.utils.*;
+import org.zstack.header.vo.*;
+import org.zstack.utils.BeanUtils;
+import org.zstack.utils.DebugUtils;
+import org.zstack.utils.FieldUtils;
+import org.zstack.utils.ObjectUtils;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.logging.CLoggerImpl;
 
@@ -32,9 +33,9 @@ import static org.zstack.utils.CollectionDSL.list;
 public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     private static final CLogger logger = CLoggerImpl.getLogger(DatabaseFacadeImpl.class);
 
-    @PersistenceUnit(unitName="zstack.jpa")
+    @PersistenceUnit(unitName = "zstack.jpa")
     private EntityManagerFactory entityManagerFactory;
-    @PersistenceContext(unitName="zstack.jpa")
+    @PersistenceContext(unitName = "zstack.jpa")
     private EntityManager entityManager;
 
     @Autowired
@@ -50,17 +51,20 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     private Map<Class, List<HardDeleteEntityExtensionPoint>> hardDeleteExtensions = new HashMap<Class, List<HardDeleteEntityExtensionPoint>>();
     private List<HardDeleteEntityExtensionPoint> hardDeleteForAllExtensions = new ArrayList<HardDeleteEntityExtensionPoint>();
     private Map<Class, EntityInfo> entityInfoMap = new HashMap<Class, EntityInfo>();
+    private String dbVersion;
 
-    private class EntityInfo {
+    class EntityInfo {
         Field voPrimaryKeyField;
         Field eoPrimaryKeyField;
         Field eoSoftDeleteColumn;
         Class eoClass;
         Class voClass;
+        Map<EntityEvent, EntityLifeCycleCallback> listeners = new HashMap<EntityEvent, EntityLifeCycleCallback>();
 
         EntityInfo(Class voClazz) {
             voClass = voClazz;
             voPrimaryKeyField = FieldUtils.getAnnotatedField(Id.class, voClass);
+            DebugUtils.Assert(voPrimaryKeyField != null, String.format("%s has no primary key", voClass));
             voPrimaryKeyField.setAccessible(true);
 
             EO at = (EO) voClazz.getAnnotation(EO.class);
@@ -284,6 +288,11 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         private void softDelete(Object entity) {
             try {
                 Object idval = getEOPrimaryKeyValue(entity);
+                if (idval == null) {
+                    // the entity is physically deleted
+                    return;
+                }
+
                 Object eo = getEntityManager().find(eoClass, idval);
                 eoSoftDeleteColumn.set(eo, new Timestamp(new Date().getTime()).toString());
                 getEntityManager().merge(eo);
@@ -328,13 +337,15 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         }
 
         private void hardDelete(Collection ids) {
+            String tblName = hasEO() ? eoClass.getSimpleName() : voClass.getSimpleName();
+
             if (ids.size() == 1) {
-                String sql = String.format("delete from %s eo where eo.%s = :id", voClass.getSimpleName(), voPrimaryKeyField.getName());
+                String sql = String.format("delete from %s eo where eo.%s = :id", tblName, voPrimaryKeyField.getName());
                 Query q = getEntityManager().createQuery(sql);
                 q.setParameter("id", ids.iterator().next());
                 q.executeUpdate();
             } else {
-                String sql = String.format("delete from %s eo where eo.%s in (:ids)", voClass.getSimpleName(), voPrimaryKeyField.getName());
+                String sql = String.format("delete from %s eo where eo.%s in (:ids)", tblName, voPrimaryKeyField.getName());
                 Query q = getEntityManager().createQuery(sql);
                 q.setParameter("ids", ids);
                 q.executeUpdate();
@@ -420,10 +431,29 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
             Long count = q.getSingleResult();
             return count > 0;
         }
+
+        void installLifeCycleCallback(EntityEvent evt, EntityLifeCycleCallback l) {
+            listeners.put(evt, l);
+        }
+
+        void fireLifeCycleEvent(EntityEvent evt, Object o) {
+            EntityLifeCycleCallback cb = listeners.get(evt);
+            if (cb != null) {
+                cb.entityLifeCycleEvent(evt, o);
+            }
+        }
+    }
+
+    @Transactional(readOnly = true)
+    private void getDbVersionOnInit() {
+        String sql = "select version from schema_version order by version desc limit 1";
+        Query q = getEntityManager().createNativeQuery(sql);
+        dbVersion = (String) q.getSingleResult();
     }
 
     void init() {
         buildEntityInfo();
+        getDbVersionOnInit();
     }
 
     @Override
@@ -431,9 +461,9 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         return persist(entity, false);
     }
 
-    private EntityInfo getEntityInfo(Class clz) {
+    EntityInfo getEntityInfo(Class clz) {
         EntityInfo info = entityInfoMap.get(clz);
-        DebugUtils.Assert(info!=null, String.format("cannot find entity info for %s", clz.getName()));
+        DebugUtils.Assert(info != null, String.format("cannot find entity info for %s", clz.getName()));
         return info;
     }
 
@@ -464,11 +494,13 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     }
 
     @Override
+    @DeadlockAutoRestart
     public void remove(Object entity) {
         getEntityInfo(entity.getClass()).remove(entity);
     }
 
     @Override
+    @DeadlockAutoRestart
     public void removeCollection(Collection entities, Class entityClass) {
         if (entities.isEmpty()) {
             return;
@@ -478,6 +510,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     }
 
     @Override
+    @DeadlockAutoRestart
     public void removeByPrimaryKeys(Collection priKeys, Class entityClazz) {
         if (priKeys.isEmpty()) {
             return;
@@ -498,8 +531,32 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public <T> T find(Query q) {
+        List<T> ret = q.getResultList();
+        if (ret.size() > 1) {
+            throw new CloudRuntimeException("more than one result found");
+        }
+        return ret.isEmpty() ? null : ret.get(0);
+    }
+
+    @Override
+    @DeadlockAutoRestart
     public void removeByPrimaryKey(Object primaryKey, Class<?> entityClass) {
         getEntityInfo(entityClass).removeByPrimaryKey(primaryKey);
+    }
+
+    @Override
+    @Transactional
+    public void hardDeleteCollectionSelectedBySQL(String sql, Class entityClass) {
+        EntityInfo info = getEntityInfo(entityClass);
+        Query q = getEntityManager().createQuery(sql);
+        List ids = q.getResultList();
+        if (ids.isEmpty()) {
+            return;
+        }
+
+        info.hardDelete(ids);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -538,7 +595,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         }
         return transactionAsyncCallbacks;
     }
-    
+
     private List<TransactionalSyncCallback> getTransactionSyncCallbacks() {
         if (transactionSyncCallbacks == null) {
             transactionSyncCallbacks = new ArrayList<TransactionalSyncCallback>();
@@ -547,7 +604,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         }
         return transactionSyncCallbacks;
     }
-    
+
     @Override
     public void entityForTranscationCallback(Operation op, Class<?>... entityClass) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -555,7 +612,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
                 TransactionSynchronizationSyncImpl tsi = new TransactionSynchronizationSyncImpl(cb, op, entityClass);
                 TransactionSynchronizationManager.registerSynchronization(tsi);
             }
-            
+
             for (TransactionalCallback cb : getTransactionAsyncCallbacks()) {
                 TransactionSynchronizationAsyncImpl tsi = new TransactionSynchronizationAsyncImpl(cb, op, entityClass);
                 TransactionSynchronizationManager.registerSynchronization(tsi);
@@ -565,7 +622,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
             for (Class<?> c : entityClass) {
                 sb.append(c.getName()).append(",");
             }
-            
+
             String err = String.format("entityForTranscationCallback is called but transcation is not active. Did you forget adding @Transactional to method??? [operation: %s, entity classes: %s]", op, sb.toString());
             logger.warn(err);
         }
@@ -575,17 +632,22 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         this.dataSource = dataSource;
     }
 
-	@Override
-	public <T> T reload(T entity) {
-        return (T) getEntityInfo(entity.getClass()).reload(entity);
-	}
-
     @Override
+    public <T> T reload(T entity) {
+        return (T) getEntityInfo(entity.getClass()).reload(entity);
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void updateCollection(Collection entities) {
+    private void doUpdateCollection(Collection entities) {
         for (Object e : entities) {
             getEntityManager().merge(e);
         }
+    }
+
+    @Override
+    @DeadlockAutoRestart
+    public void updateCollection(Collection entities) {
+        doUpdateCollection(entities);
     }
 
     @Override
@@ -608,7 +670,7 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     public <T> List<T> listByApiMessage(APIListMessage msg, Class<T> clazz) {
         return listByPrimaryKeys(msg.getUuids(), msg.getOffset(), msg.getLength(), clazz);
     }
-    
+
     @Override
     public <T> List<T> listAll(Class<T> clazz) {
         return listAll(0, Integer.MAX_VALUE, clazz);
@@ -643,18 +705,30 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
         return getEntityInfo(clazz).isExist(id);
     }
 
-    @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void eoCleanup(Class VOClazz) {
-        EO at = (EO) VOClazz.getAnnotation(EO.class);
-        if (at == null) {
+    private void _eoCleanup(Class VOClazz) {
+        EntityInfo info = getEntityInfo(VOClazz);
+        if (!info.hasEO()) {
             return;
         }
 
-        String deleted = at.softDeletedColumn();
-        String sql = String.format("delete from %s eo where eo.%s is not null", at.EOClazz().getSimpleName(), deleted);
+        String deleted = info.eoSoftDeleteColumn.getName();
+        String sql = String.format("select eo.%s from %s eo where eo.%s is not null", info.voPrimaryKeyField.getName(),
+                info.eoClass.getSimpleName(), deleted);
         Query q = getEntityManager().createQuery(sql);
-        q.executeUpdate();
+        List ids = q.getResultList();
+        if (ids.isEmpty()) {
+            return;
+        }
+
+        info.hardDelete(ids);
+
+    }
+
+    @Override
+    @DeadlockAutoRestart
+    public void eoCleanup(Class VOClazz) {
+        _eoCleanup(VOClazz);
     }
 
     @Override
@@ -732,7 +806,42 @@ public class DatabaseFacadeImpl implements DatabaseFacade, Component {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Timestamp getCurrentSqlTime() {
+        Query query = getEntityManager().createNativeQuery("select current_timestamp()");
+        return (Timestamp) query.getSingleResult();
+    }
+
+    @Override
+    public String getDbVersion() {
+        return dbVersion;
+    }
+
+    @Override
+    public void installEntityLifeCycleCallback(Class clz, EntityEvent evt, EntityLifeCycleCallback cb) {
+        if (clz != null) {
+            EntityInfo info = entityInfoMap.get(clz);
+            DebugUtils.Assert(info != null, String.format("cannot find EntityInfo for the class[%s]", clz));
+            info.installLifeCycleCallback(evt, cb);
+        } else {
+            for (EntityInfo info : entityInfoMap.values()) {
+                info.installLifeCycleCallback(evt, cb);
+            }
+        }
+    }
+
+    @Override
     public boolean stop() {
         return true;
+    }
+
+    void entityEvent(EntityEvent evt, Object entity) {
+        EntityInfo info = entityInfoMap.get(entity.getClass());
+        if (info == null) {
+            logger.warn(String.format("cannot find EntityInfo for the class[%s], not entity events will be fired", entity.getClass()));
+            return;
+        }
+
+        info.fireLifeCycleEvent(evt, entity);
     }
 }

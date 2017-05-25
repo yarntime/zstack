@@ -7,18 +7,14 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
-import org.zstack.header.identity.*;
 import org.zstack.header.identity.AccountConstant.StatementEffect;
+import org.zstack.header.identity.*;
 import org.zstack.header.identity.PolicyInventory.Statement;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
-import org.zstack.test.search.QueryTestValidator;
+import org.zstack.test.*;
 
 /**
  * 1. delete an account
- *
+ * <p>
  * confirm the resources under the account are deleted
  */
 public class TestIdentity8 {
@@ -29,14 +25,14 @@ public class TestIdentity8 {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
         api = new Api();
         api.startServer();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         IdentityCreator creator = new IdentityCreator(api);

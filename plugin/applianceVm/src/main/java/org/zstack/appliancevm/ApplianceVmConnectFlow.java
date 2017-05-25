@@ -4,14 +4,13 @@ import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.CoreGlobalProperty;
-import org.zstack.core.config.GlobalConfigFacade;
+import org.zstack.core.ansible.AnsibleFacade;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.core.thread.CancelablePeriodicTask;
 import org.zstack.core.thread.ThreadFacade;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.core.workflow.NoRollbackFlow;
-import org.zstack.header.configuration.ConfigurationConstant;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.vm.VmInstanceConstant;
@@ -38,11 +37,11 @@ public class ApplianceVmConnectFlow extends NoRollbackFlow {
     @Autowired
     private ThreadFacade thdf;
     @Autowired
-    private GlobalConfigFacade gcf;
-    @Autowired
     private DatabaseFacade dbf;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private AnsibleFacade asf;
 
     private static final String ERROR_LOG_PATH = "/var/lib/zstack/error.log";
 
@@ -70,10 +69,10 @@ public class ApplianceVmConnectFlow extends NoRollbackFlow {
         }
 
         final int connectTimeout = ApplianceVmGlobalConfig.CONNECT_TIMEOUT.value(Integer.class);
+        final String privKey = asf.getPrivateKey();
         final String username = "root";
-        final String privKey = gcf.getConfigValue(ConfigurationConstant.GlobalConfig.privateKey.getCategory(),
-                ConfigurationConstant.GlobalConfig.privateKey.toString(), String.class);
         final int sshPort = 22;
+
         final boolean connectVerbose = ApplianceVmGlobalProperty.CONNECT_VERBOSE;
 
         final String mgmtIp = mgmtNic.getIp();
@@ -106,7 +105,7 @@ public class ApplianceVmConnectFlow extends NoRollbackFlow {
             }
 
             private void sshLogIn() throws InterruptedException {
-                long expired = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(ApplianceVmGlobalConfig.SSH_LOGIN_TIMEOUT.value(Integer.class));
+                long expired = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(ApplianceVmGlobalConfig.SSH_LOGIN_TIMEOUT.value(Long.class));
                 SshException se = null;
                 while (true) {
                    try {

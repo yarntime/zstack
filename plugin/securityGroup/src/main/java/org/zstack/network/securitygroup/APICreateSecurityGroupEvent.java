@@ -1,6 +1,11 @@
 package org.zstack.network.securitygroup;
 
+import org.junit.Test;
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
+import java.sql.Timestamp;
+
 /**
  *@apiResult
  *
@@ -27,6 +32,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse(allTo = "inventory")
 public class APICreateSecurityGroupEvent extends APIEvent {
     /**
      * @desc see :ref:`SecurityGroupInventory`
@@ -47,4 +53,20 @@ public class APICreateSecurityGroupEvent extends APIEvent {
     public void setInventory(SecurityGroupInventory inventory) {
         this.inventory = inventory;
     }
+ 
+    public static APICreateSecurityGroupEvent __example__() {
+        //todo make sure empty attachedL3NetworkUuids and rules no need to set
+        APICreateSecurityGroupEvent event = new APICreateSecurityGroupEvent();
+        SecurityGroupInventory sec = new SecurityGroupInventory();
+        sec.setUuid(uuid());
+        sec.setName("web");
+        sec.setDescription("for test");
+        sec.setState("Enabled");
+        sec.setCreateDate(new Timestamp(System.currentTimeMillis()));
+        sec.setLastOpDate(new Timestamp(System.currentTimeMillis()));
+        event.setInventory(sec);
+        event.setSuccess(true);
+        return event;
+    }
+
 }

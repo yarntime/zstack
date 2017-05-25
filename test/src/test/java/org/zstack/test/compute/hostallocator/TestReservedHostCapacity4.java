@@ -13,6 +13,7 @@ import org.zstack.header.image.ImageInventory;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.tag.TagInventory;
 import org.zstack.header.zone.ZoneInventory;
+import org.zstack.tag.SystemTagCreator;
 import org.zstack.test.*;
 import org.zstack.test.deployer.Deployer;
 
@@ -23,12 +24,13 @@ import static org.zstack.utils.CollectionDSL.map;
  * 1. set ZoneTag.HOST_RESERVED_CPU_CAPACITY to a big value that makes allocation failure
  * 2. set ZoneTag.HOST_RESERVED_MEMORY_CAPACITY to a big value that makes allocation failure
  * 3. remove all tags
- *
+ * <p>
  * confirm in case 1,2 vm creation fails, in case 3 vm creation succeeds
  */
+@Deprecated
 public class TestReservedHostCapacity4 {
     Deployer deployer;
-    Api api; 
+    Api api;
     ComponentLoader loader;
     CloudBus bus;
     DatabaseFacade dbf;
@@ -50,9 +52,11 @@ public class TestReservedHostCapacity4 {
     public void test() throws ApiSenderException {
         boolean success = false;
         ZoneInventory zone = deployer.zones.values().iterator().next();
-        TagInventory tag = ZoneSystemTags.HOST_RESERVED_CPU_CAPACITY.createTag(zone.getUuid(), map(e("capacity", 10*2600L)));
+        SystemTagCreator sc = ZoneSystemTags.HOST_RESERVED_CPU_CAPACITY.newSystemTagCreator(zone.getUuid());
+        sc.setTagByTokens(map(e("capacity", 10*2600L)));
+        TagInventory tag = sc.create();
 
-        L3NetworkInventory l3  = deployer.l3Networks.get("TestL3Network1");
+        L3NetworkInventory l3 = deployer.l3Networks.get("TestL3Network1");
         InstanceOfferingInventory instanceOffering = deployer.instanceOfferings.get("TestInstanceOffering");
         ImageInventory imageInventory = deployer.images.get("TestImage");
 
@@ -73,7 +77,9 @@ public class TestReservedHostCapacity4 {
         api.deleteTag(tag.getUuid());
 
         success = false;
-        tag = ZoneSystemTags.HOST_RESERVED_MEMORY_CAPACITY.createTag(zone.getUuid(), map(e("capacity", "10G")));
+        sc = ZoneSystemTags.HOST_RESERVED_MEMORY_CAPACITY.newSystemTagCreator(zone.getUuid());
+        sc.setTagByTokens(map(e("capacity", "10G")));
+        tag = sc.create();
         try {
             VmCreator creator = new VmCreator(api);
             creator.timeout = 600;

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="180">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
 	<TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding"/>
 	<TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding2"/>
 	<TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding3"/>
@@ -28,10 +28,12 @@
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding26"/>
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding27"/>
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding28"/>
-    <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding29"/>
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding30"/>
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding31"/>
     <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding32"/>
+    <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding33"/>
+    <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding34"/>
+    <TestCase class="org.zstack.test.virtualrouter.TestVirtualRouterPortForwarding35"/>
     <TestCase class="org.zstack.test.virtualrouter.TestUpdateVirtualRouterPortForwardingAndVip"/>
     <TestCase class="org.zstack.test.virtualrouter.TestPolicyForPortForwarding"/>
     <TestCase class="org.zstack.test.virtualrouter.TestPolicyForPortForwarding1"/>

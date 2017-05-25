@@ -10,10 +10,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.zstack.utils.StringDSL.ln;
-import static org.zstack.utils.StringDSL.s;
 
 public class BeanConstructor {
     private List<String> xmls = new ArrayList<String>();
+    private List<String> excludedXmls = new ArrayList<String>();
     private static final String SPRING_XML_NAME = "spring-config-for-unit-test-from-BeanConstructor.xml";
     protected ComponentLoader loader;
     protected String springConfigPath;
@@ -36,9 +36,14 @@ public class BeanConstructor {
             "<import resource=\"springConfigXml/Aspect.xml\" />",
             "<import resource=\"springConfigXml/keyValueFacade.xml\" />",
             "<import resource=\"springConfigXml/jmx.xml\" />",
-            "<import resource=\"springConfigXml/logFacade.xml\" />",
             "<import resource=\"springConfigXml/Error.xml\" />",
-            "<import resource=\"springConfigXml/gc.xml\" />"
+            "<import resource=\"springConfigXml/gc.xml\" />",
+            "<import resource=\"springConfigXml/debug.xml\" />",
+            "<import resource=\"springConfigXml/SchedulerFacade.xml\" />",
+            "<import resource=\"springConfigXml/jsonlabel.xml\" />",
+            "<import resource=\"springConfigXml/encrypt.xml\" />",
+            "<import resource=\"springConfigXml/rest.xml\" />"
+
     ).toString();
 
     public BeanConstructor() {
@@ -50,6 +55,11 @@ public class BeanConstructor {
         }
 
         xmls.add(xmlName);
+        return this;
+    }
+
+    public BeanConstructor excludeXml(String name) {
+        excludedXmls.add(name);
         return this;
     }
 
@@ -75,11 +85,11 @@ public class BeanConstructor {
                 String r = String.format("\t<import resource=\"zstack.xml\" />");
                 contents.add(insertPos, r);
             } else {
-                for (String bean: coreBeans.split("\\n")) {
+                for (String bean : coreBeans.split("\\n")) {
                     contents.add(insertPos, bean);
                 }
             }
-            
+
             for (String c : xmls) {
                 String r = String.format("\t<import resource=\"springConfigXml/%s\" />", c);
                 contents.add(insertPos, r);
@@ -100,9 +110,23 @@ public class BeanConstructor {
     }
 
     public ComponentLoader build() {
+        excludeXmls();
         generateSpringConfig();
         System.setProperty("spring.xml", SPRING_XML_NAME);
         loader = Platform.getComponentLoader();
         return loader;
+    }
+
+    private void excludeXmls() {
+        List<String> tmp = new ArrayList<String>();
+        for (String xml : xmls) {
+            if (excludedXmls.contains(xml)) {
+                continue;
+            }
+
+            tmp.add(xml);
+        }
+
+        xmls = tmp;
     }
 }

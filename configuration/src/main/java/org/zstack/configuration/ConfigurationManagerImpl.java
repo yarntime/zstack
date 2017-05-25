@@ -9,6 +9,7 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.core.type.filter.AssignableTypeFilter;
+import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Controller;
 import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
@@ -18,6 +19,7 @@ import org.zstack.core.config.GlobalConfig;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.DbEntityLister;
+import org.zstack.core.db.SQLBatchWithReturn;
 import org.zstack.core.rest.RESTApiJsonTemplateGenerator;
 import org.zstack.header.AbstractService;
 import org.zstack.header.allocator.HostAllocatorConstant;
@@ -46,15 +48,22 @@ import org.zstack.utils.path.PathUtil;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
-import javax.swing.text.html.HTML.Tag;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class ConfigurationManagerImpl extends AbstractService implements ConfigurationManager {
     private static final CLogger logger = Utils.getLogger(ConfigurationManagerImpl.class);
     private static final FieldPrinter printer = Utils.getFieldPrinter();
+    private static final Set<Class> allowedInstanceOfferingMessageAfterSoftDeletion = new HashSet<>();
+    private static final Set<Class> allowedDiskOfferingMessageAfterSoftDeletion = new HashSet<>();
+
+    static {
+        allowedDiskOfferingMessageAfterSoftDeletion.add(DiskOfferingDeletionMsg.class);
+        allowedInstanceOfferingMessageAfterSoftDeletion.add(InstanceOfferingDeletionMsg.class);
+    }
 
     @Autowired
     private CloudBus bus;
@@ -70,21 +79,11 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
     private TagManager tagMgr;
     @Autowired
     private AccountManager acntMgr;
-
-
     private Set<String> generatedPythonClassName;
-    private Map<String, InstanceOfferingFactory> instanceOfferingFactories = new HashMap<String, InstanceOfferingFactory>();
-    private Map<String, DiskOfferingFactory> diskOfferingFactories = new HashMap<String, DiskOfferingFactory>();
-    private Set<String> generatedGroovyClassName = new HashSet<String>();
-    private List<PythonApiBindingWriter> pythonApiBindingWriters = new ArrayList<PythonApiBindingWriter>();
-
-    private static final Set<Class> allowedInstanceOfferingMessageAfterSoftDeletion = new HashSet<Class>();
-    private static final Set<Class> allowedDiskOfferingMessageAfterSoftDeletion = new HashSet<Class>();
-
-    static {
-        allowedDiskOfferingMessageAfterSoftDeletion.add(DiskOfferingDeletionMsg.class);
-        allowedInstanceOfferingMessageAfterSoftDeletion.add(InstanceOfferingDeletionMsg.class);
-    }
+    private Map<String, InstanceOfferingFactory> instanceOfferingFactories = new HashMap<>();
+    private Map<String, DiskOfferingFactory> diskOfferingFactories = new HashMap<>();
+    private Set<String> generatedGroovyClassName = new HashSet<>();
+    private List<PythonApiBindingWriter> pythonApiBindingWriters = new ArrayList<>();
 
     private void instanceOfferingPassThrough(InstanceOfferingMessage msg) {
         InstanceOfferingVO vo = dbf.findByUuid(msg.getInstanceOfferingUuid(), InstanceOfferingVO.class);
@@ -94,13 +93,14 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
 
         if (vo == null) {
-            bus.replyErrorByMessageType((Message)msg, String.format("cannot find InstanceOffering[uuid:%s], it may have been deleted", msg.getInstanceOfferingUuid()));
+            bus.replyErrorByMessageType((Message) msg, String.format("cannot find InstanceOffering[uuid:%s]," +
+                    " it may have been deleted", msg.getInstanceOfferingUuid()));
             return;
         }
 
         InstanceOfferingFactory factory = getInstanceOfferingFactory(vo.getType());
         InstanceOffering offering = factory.getInstanceOffering(vo);
-        offering.handleMessage((Message)msg);
+        offering.handleMessage((Message) msg);
     }
 
     private void diskOfferingPassThrough(DiskOfferingMessage msg) {
@@ -111,13 +111,14 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
 
         if (vo == null) {
-            bus.replyErrorByMessageType((Message)msg, String.format("cannot find DiskOffering[uuid:%s], it may have been deleted", msg.getDiskOfferingUuid()));
+            bus.replyErrorByMessageType((Message) msg, String.format("cannot find DiskOffering[uuid:%s]," +
+                    " it may have been deleted", msg.getDiskOfferingUuid()));
             return;
         }
 
         DiskOfferingFactory factory = getDiskOfferingFactory(vo.getType());
         DiskOffering offering = factory.getDiskOffering(vo);
-        offering.handleMessage((Message)msg);
+        offering.handleMessage((Message) msg);
     }
 
     @Override
@@ -192,7 +193,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
         */
 
-        List<String> pps = new ArrayList<String>();
+        List<String> pps = new ArrayList<>();
         for (Map.Entry<String, String> e : Platform.getGlobalProperties().entrySet()) {
             pps.add(String.format("%s: %s", e.getKey(), e.getValue()));
         }
@@ -217,7 +218,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
     }
 
     private void handle(APIGenerateApiTypeScriptDefinitionMsg msg) {
-        TypeScriptApiWriter writer = GroovyUtils.loadClass("scripts/TypeScriptApiWriterImpl.groovy", this.getClass().getClassLoader());
+        TypeScriptApiWriter writer = GroovyUtils.newInstance("scripts/TypeScriptApiWriterImpl.groovy", this.getClass().getClassLoader());
         List<Class> apiMsgClass = BeanUtils.scanClassByType("org.zstack", APIMessage.class);
         List<Class> apiEventClass = BeanUtils.scanClassByType("org.zstack", APIEvent.class);
         List<Class> apiReplyClass = BeanUtils.scanClassByType("org.zstack", APIReply.class);
@@ -254,7 +255,8 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             }
         });
 
-        String exportPath = msg.getOutputPath() != null ? msg.getOutputPath() : PathUtil.join(System.getProperty("user.home"), "zstack-api-typescript", "api.ts");
+        String exportPath = msg.getOutputPath() != null ?
+                msg.getOutputPath() : PathUtil.join(System.getProperty("user.home"), "zstack-api-typescript", "api.ts");
         writer.write(exportPath, apiMsgClass, apiEventClass, inventoryClass);
         APIGenerateApiTypeScriptDefinitionEvent evt = new APIGenerateApiTypeScriptDefinitionEvent(msg.getId());
         bus.publish(evt);
@@ -289,6 +291,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(true);
             scanner.addIncludeFilter(new AnnotationTypeFilter(EO.class));
             scanner.addExcludeFilter(new AnnotationTypeFilter(Controller.class));
+            scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
             StringBuilder sb = new StringBuilder();
             for (String pkg : msg.getBasePackageNames()) {
                 for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
@@ -334,7 +337,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
     private String whiteSpace(int num) {
         return StringUtils.repeat(" ", num);
     }
-    
+
     private String classToInventoryPythonClass(Class<?> clazz) {
         StringBuilder sb = new StringBuilder();
         boolean hasParent = (clazz.getSuperclass() != Object.class);
@@ -342,7 +345,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         if (hasParent && !isPythonClassGenerated(clazz.getSuperclass())) {
             sb.append(classToInventoryPythonClass(clazz.getSuperclass()));
         }
-        
+
         if (hasParent) {
             sb.append(String.format("\nclass %s(%s):", clazz.getSimpleName(), clazz.getSuperclass().getSimpleName()));
             sb.append(String.format("\n%sdef __init__(self):", whiteSpace(4)));
@@ -351,12 +354,12 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             sb.append(String.format("\nclass %s(object):", clazz.getSimpleName()));
             sb.append(String.format("\n%sdef __init__(self):", whiteSpace(4)));
         }
-        
+
         Field[] fs = clazz.getDeclaredFields();
         for (Field f : fs) {
             sb.append(String.format("\n%sself.%s = None", whiteSpace(8), f.getName()));
         }
-        
+
         sb.append(String.format("\n\n%sdef evaluate(self, inv):", whiteSpace(4)));
         if (hasParent) {
             sb.append(String.format("\n%ssuper(%s, self).evaluate(inv)", whiteSpace(8), clazz.getSimpleName()));
@@ -367,7 +370,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             sb.append(String.format("\n%selse:", whiteSpace(8)));
             sb.append(String.format("\n%sself.%s = None\n", whiteSpace(12), f.getName()));
         }
-        
+
         sb.append("\n\n");
         markPythonClassAsGenerated(clazz);
         return sb.toString();
@@ -398,6 +401,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         scanner.addIncludeFilter(new AssignableTypeFilter(APIReply.class));
         scanner.addIncludeFilter(new AssignableTypeFilter(APIEvent.class));
         scanner.addExcludeFilter(new AnnotationTypeFilter(Controller.class));
+        scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
         for (String pkg : basePkgs) {
             for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
                 try {
@@ -424,7 +428,8 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         sb.append(String.format("\n%sdef creatingTime\n", whiteSpace(4)));
         sb.append(String.format("\n%sString toString() {", whiteSpace(4)));
         sb.append(String.format("\n%sproperties.each {", whiteSpace(8)));
-        sb.append(String.format("\n%sif (it.value instanceof NotNullObject) { throw new UIRuntimeException(\"propertiy ${it.key} can not be null in ${fullName()}\")}", whiteSpace(12)));
+        sb.append(String.format("\n%sif (it.value instanceof NotNullObject)" +
+                " { throw new UIRuntimeException(\"propertiy ${it.key} can not be null in ${fullName()}\")}", whiteSpace(12)));
         sb.append(String.format("\n%s}\n", whiteSpace(8)));
         sb.append(String.format("\n%sreturn JSON.dump([(fullName()):this])", whiteSpace(8)));
         sb.append(String.format("\n%s}\n", whiteSpace(4)));
@@ -520,11 +525,11 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         sb.append(String.format("\n}\n\n"));
         generatedGroovyClassName.add(clazz.getSimpleName());
     }
-    
+
     private String classToApiMessagePythonClass(Class<?> clazz) {
         StringBuilder sb = new StringBuilder();
         boolean emptyLine = true;
-        
+
         String signature = String.format("%s_FULL_NAME", clazz.getSimpleName()).toUpperCase();
         sb.append(String.format("\n%s = '%s'", signature, clazz.getName()));
         sb.append(String.format("\nclass %s(object):", clazz.getSimpleName()));
@@ -535,7 +540,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
 
         for (Field f : fs) {
             APINoSee nosee = f.getAnnotation(APINoSee.class);
-            if (nosee != null) {
+            if (nosee != null && !f.getName().equals("timeout") && !f.getName().equals("session")) {
                 continue;
             }
 
@@ -554,9 +559,13 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
                 sb.append(String.format("\n%s#mandatory field", whiteSpace(8)));
             }
             if (at != null && at.validValues().length != 0) {
-                List<String> values = new ArrayList<String>(at.validValues().length);
+                List<String> values = new ArrayList<>(at.validValues().length);
                 Collections.addAll(values, at.validValues());
                 sb.append(String.format("\n%s#valid values: %s", whiteSpace(8), values));
+            }
+            if (at != null && at.validRegexValues() != null && at.validRegexValues().trim().equals("") == false) {
+                String regex = at.validRegexValues().trim();
+                sb.append(String.format("\n%s#valid regex values: %s", whiteSpace(8), regex));
             }
 
             if (Collection.class.isAssignableFrom(f.getType())) {
@@ -585,12 +594,12 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         if (emptyLine) {
             sb.append(String.format("\n%spass", whiteSpace(8)));
         }
-        
+
         sb.append("\n\n");
         markPythonClassAsGenerated(clazz);
         return sb.toString();
     }
-    
+
     private void generateSimplePythonClass(StringBuilder sb, Class<?> clazz) {
         sb.append(String.format("\nclass %s(object):", clazz.getSimpleName()));
         sb.append(String.format("\n%sdef __init__(self):", whiteSpace(4)));
@@ -599,24 +608,24 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
         sb.append("\n\n");
     }
-    
+
     private void generateErrorCodePythonClass(StringBuilder sb) {
         generateSimplePythonClass(sb, ErrorCode.class);
     }
-    
+
     private void generateSessionPythonClass(StringBuilder sb) {
         sb.append(String.format("\nclass Session(object):"));
         sb.append(String.format("\n%sdef __init__(self):", whiteSpace(4)));
         sb.append(String.format("\n%sself.uuid = None", whiteSpace(8)));
         sb.append("\n\n");
     }
-    
+
 
     private void generateSeachConditionClass(StringBuilder sb) {
         generateSimplePythonClass(sb, APISearchMessage.NOLTriple.class);
         generateSimplePythonClass(sb, APISearchMessage.NOVTriple.class);
     }
-    
+
     private void generateMandoryFieldClass(StringBuilder sb) {
         sb.append(String.format("\n\nclass NotNoneField(object):"));
         sb.append(String.format("\n%spass\n", whiteSpace(4)));
@@ -633,7 +642,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         sb.append(String.format("\n\nclass OptionalMap(object):"));
         sb.append(String.format("\n%spass\n", whiteSpace(4)));
     }
-    
+
     private void generateBaseApiMessagePythonClass(StringBuilder sb) {
         sb.append(String.format("\nclass %s(object):", APIMessage.class.getSimpleName()));
         sb.append(String.format("\n%sdef __init__(self):", whiteSpace(4)));
@@ -648,15 +657,16 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         markPythonClassAsGenerated(APIDeleteMessage.class);
         generateSeachConditionClass(sb);
     }
-    
+
     private void generateApiNameList(StringBuilder sb, List<String> apiNames) {
+        Collections.sort(apiNames);
         sb.append(String.format("\napi_names = ["));
         for (String name : apiNames) {
             sb.append(String.format("\n%s'%s',", whiteSpace(4), name));
         }
         sb.append("\n]\n");
     }
-    
+
     private void generateApiMessagePythonClass(StringBuilder sb, List<String> basePkgs) {
         generateSessionPythonClass(sb);
         generateErrorCodePythonClass(sb);
@@ -666,9 +676,10 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         scanner.addIncludeFilter(new AssignableTypeFilter(APIReply.class));
         scanner.addExcludeFilter(new AnnotationTypeFilter(Controller.class));
         scanner.addExcludeFilter(new AnnotationTypeFilter(NoPython.class));
-        List<String> apiNames = new ArrayList<String>(100);
+        scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
+        List<String> apiNames = new ArrayList<>(100);
         for (String pkg : basePkgs) {
-            for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
+            for (BeanDefinition bd : scanner.findCandidateComponents(pkg).stream().sorted(Comparator.comparing(BeanDefinition::getBeanClassName)).collect(Collectors.toList())) {
                 try {
                     Class<?> clazz = Class.forName(bd.getBeanClassName());
                     if (clazz == APIMessage.class || clazz == APIListMessage.class || clazz == APIDeleteMessage.class || clazz == APISearchMessage.class) {
@@ -691,15 +702,16 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
                 }
             }
         }
-        
+
         apiNames.remove(APIMessage.class.getSimpleName());
         apiNames.remove(APIListMessage.class.getSimpleName());
         apiNames.remove(APIDeleteMessage.class.getSimpleName());
         apiNames.remove(APISearchMessage.class.getSimpleName());
         generateApiNameList(sb, apiNames);
     }
-    
+
     private void generateConstantFromClassField(StringBuilder sb, Class<?> clazz) throws IllegalArgumentException, IllegalAccessException {
+        sb.append("\n#").append(clazz.getSimpleName());
         if (clazz.isEnum()) {
             for (Field f : clazz.getDeclaredFields()) {
                 if (f.isEnumConstant()) {
@@ -722,12 +734,15 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
                 sb.append(String.format("\n%s = '%s'", name, value));
             }
         }
+        sb.append("\n");
     }
 
     private void generateConstantPythonClass(StringBuilder sb, List<String> basePkgs) {
-        Reflections reflections = new Reflections("org.zstack");
+        Reflections reflections = Platform.getReflections();
         Set<Class<?>> annotated = reflections.getTypesAnnotatedWith(PythonClass.class);
-        for (Class<?> clazz : annotated) {
+        for (Class<?> clazz : annotated.stream().sorted((c1, c2) -> {
+            return c1.getSimpleName().compareTo(c2.getSimpleName());
+        }).collect(Collectors.toList())) {
             try {
                 generateConstantFromClassField(sb, clazz);
             } catch (Exception e) {
@@ -735,13 +750,16 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             }
         }
     }
-    
+
     private void generateInventoryPythonClass(StringBuilder sb, List<String> basePkgs) {
-        List<String> inventoryPython = new ArrayList<String>();
+        List<String> inventoryPython = new ArrayList<>();
         ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
         scanner.addIncludeFilter(new AnnotationTypeFilter(PythonClassInventory.class));
+        scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
         for (String pkg : basePkgs) {
-            for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
+            for (BeanDefinition bd : scanner.findCandidateComponents(pkg).stream().sorted((bd1, bd2) -> {
+                return bd1.getBeanClassName().compareTo(bd2.getBeanClassName());
+            }).collect(Collectors.toList())) {
                 try {
                     Class<?> clazz = Class.forName(bd.getBeanClassName());
                     if (isPythonClassGenerated(clazz)) {
@@ -753,34 +771,39 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
                     logger.warn(String.format("Unable to generate python class for %s", bd.getBeanClassName()), e);
                 }
             }
-        } 
-        
+        }
+
         for (String invstr : inventoryPython) {
             sb.append(invstr);
         }
     }
-    
+
     private boolean isPythonClassGenerated(Class<?> clazz) {
         return generatedPythonClassName.contains(clazz.getSimpleName());
     }
-    
+
     private void markPythonClassAsGenerated(Class<?> clazz) {
         generatedPythonClassName.add(clazz.getSimpleName());
     }
-    
+
     private void generateGlobalConfigPythonConstant(StringBuilder pysb) {
-        pysb.append("\n");
-        Map<String, List<String>> configs = new HashMap<String, List<String>>();
+        pysb.append("\n#GlobalConfigPythonConstant");
+        Map<String, List<String>> configs = new HashMap<>();
         for (GlobalConfig c : gcf.getAllConfig().values()) {
             List<String> cnames = configs.get(c.getCategory());
             if (cnames == null) {
-                cnames = new ArrayList<String>();
+                cnames = new ArrayList<>();
                 configs.put(c.getCategory(), cnames);
             }
             cnames.add(c.getName());
         }
-        
-        for (Map.Entry<String, List<String>> e : configs.entrySet()) {
+
+        for (Map.Entry<String, List<String>> e : configs.entrySet()
+                .stream()
+                .sorted((e1, e2) -> {
+                    return e1.getKey().toUpperCase().compareTo(e2.getKey().toUpperCase());
+                })
+                .collect(Collectors.toList())) {
             pysb.append(String.format("\nclass GlobalConfig_%s(object):", e.getKey().toUpperCase().replaceAll("\\.", "_")));
             for (String cname : e.getValue()) {
                 String var = cname.replaceAll("\\.", "_");
@@ -792,13 +815,13 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             pysb.append(String.format("\n%sreturn '%s'\n", whiteSpace(8), e.getKey()));
         }
     }
-    
+
     private void handle(APIGenerateTestLinkDocumentMsg msg) throws IOException {
         String outputDir = msg.getOutputDir();
         if (outputDir == null) {
             outputDir = PathUtil.join(System.getProperty("user.home"), "zstack-testlink");
         }
-        
+
         FileUtils.deleteDirectory(new File(outputDir));
         File folder = new File(outputDir);
         folder.mkdirs();
@@ -807,84 +830,98 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         evt.setOutputDir(outputDir);
         bus.publish(evt);
     }
-    
+
     private void handle(APIGenerateApiJsonTemplateMsg msg) throws IOException {
-        generatedPythonClassName = new HashSet<String>();
-        String exportPath = msg.getExportPath();
+        generateApiJsonTemplate(msg.getExportPath(), msg.getBasePackageNames());
+        APIGenerateApiJsonTemplateEvent evt = new APIGenerateApiJsonTemplateEvent(msg.getId());
+        bus.publish(evt);
+    }
+
+    public void generateApiJsonTemplate(String exportPath, List<String> basePkgs) throws IOException {
+        generatedPythonClassName = new HashSet<>();
         if (exportPath == null) {
             exportPath = PathUtil.join(System.getProperty("user.home"), "zstack-python-template");
         }
-        List<String> basePkgs = msg.getBasePackageNames();
         if (basePkgs == null || basePkgs.isEmpty()) {
-            basePkgs = new ArrayList<String>(1);
+            basePkgs = new ArrayList<>(1);
             basePkgs.add("org.zstack");
         }
-        
+
         FileUtils.deleteDirectory(new File(exportPath));
         File folder = new File(exportPath);
         folder.mkdirs();
-        
         File jsonFolder = new File(PathUtil.join(folder.getAbsolutePath(), "json"));
         jsonFolder.mkdirs();
-        StringBuilder apiNameBuilder = new StringBuilder();
-        apiNameBuilder.append("api_names = [\n");
-        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
-        scanner.addIncludeFilter(new AssignableTypeFilter(APIEvent.class));
-        scanner.addIncludeFilter(new AssignableTypeFilter(APIReply.class));
-        scanner.addIncludeFilter(new AssignableTypeFilter(APIMessage.class));
-        scanner.addExcludeFilter(new AnnotationTypeFilter(Controller.class));
-        for (String pkg : basePkgs) {
-            for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
-                try {
-                    Class<?> clazz = Class.forName(bd.getBeanClassName());
-                    logger.debug(String.format("dumping message: %s", bd.getBeanClassName()));
-                    String template = RESTApiJsonTemplateGenerator.dump(clazz);
-                    FileUtils.write(new File(PathUtil.join(jsonFolder.getAbsolutePath(), clazz.getName() + ".json")), template);
-                    if (APIMessage.class.isAssignableFrom(clazz)) {
+        File pythonFolder = new File(PathUtil.join(folder.getAbsolutePath(), "python"));
+        pythonFolder.mkdirs();
+
+        // write api_messages.py
+        {
+            StringBuilder apiNameBuilder = new StringBuilder();
+            apiNameBuilder.append("api_names = [\n");
+            ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
+            scanner.addIncludeFilter(new AssignableTypeFilter(APIEvent.class));
+            scanner.addIncludeFilter(new AssignableTypeFilter(APIReply.class));
+            scanner.addIncludeFilter(new AssignableTypeFilter(APIMessage.class));
+            scanner.addExcludeFilter(new AnnotationTypeFilter(Controller.class));
+            scanner.addExcludeFilter(new AnnotationTypeFilter(Component.class));
+            for (String pkg : basePkgs) {
+                for (BeanDefinition bd : scanner.findCandidateComponents(pkg)) {
+                    Class<?> clazz = null;
+                    try {
+                        clazz = Class.forName(bd.getBeanClassName());
+                        logger.debug(String.format("dumping message: %s", bd.getBeanClassName()));
+                        String template = RESTApiJsonTemplateGenerator.dump(clazz);
+                        FileUtils.write(new File(PathUtil.join(jsonFolder.getAbsolutePath(),
+                                clazz.getName() + ".json")), template);
+                    } catch (Exception e) {
+                        logger.warn(String.format("Unable to generate json template for %s", bd.getBeanClassName()), e);
+                    }
+
+                    if (clazz != null && APIMessage.class.isAssignableFrom(clazz)) {
                         if (TypeUtils.isTypeOf(clazz, APISearchMessage.class, APIGetMessage.class, APIListMessage.class)) {
                             continue;
                         }
                         apiNameBuilder.append(String.format("%s'%s',\n", whiteSpace(4), clazz.getName()));
                     }
-                } catch (Exception e) {
-                    logger.warn(String.format("Unable to generate json template for %s", bd.getBeanClassName()), e);
                 }
             }
+            apiNameBuilder.append("]\n");
+            FileUtils.write(new File(PathUtil.join(pythonFolder.getAbsolutePath(), "api_messages.py")),
+                    apiNameBuilder.toString());
         }
-        
-        File pythonFolder = new File(PathUtil.join(folder.getAbsolutePath(), "python"));
-        pythonFolder.mkdirs();
-        apiNameBuilder.append("]\n");
-        FileUtils.write(new File(PathUtil.join(pythonFolder.getAbsolutePath(), "api_messages.py")), apiNameBuilder.toString());
-        
-        StringBuilder pysb = new StringBuilder();
-        generateMandoryFieldClass(pysb);
-        generateApiMessagePythonClass(pysb, basePkgs);
-        generateInventoryPythonClass(pysb, basePkgs);
-        generateConstantPythonClass(pysb, basePkgs);
-        generateGlobalConfigPythonConstant(pysb);
-        for (PythonApiBindingWriter writer : pythonApiBindingWriters) {
-            pysb.append("\n");
-            writer.writePython(pysb);
+
+        // write inventory.py
+        {
+            StringBuilder pysb = new StringBuilder();
+            generateMandoryFieldClass(pysb);
+            generateApiMessagePythonClass(pysb, basePkgs);
+            generateInventoryPythonClass(pysb, basePkgs);
+            generateConstantPythonClass(pysb, basePkgs);
+            generateGlobalConfigPythonConstant(pysb);
+            for (PythonApiBindingWriter writer : pythonApiBindingWriters) {
+                pysb.append("\n");
+                writer.writePython(pysb);
+            }
+            String pyStr = pysb.toString();
+            FileUtils.write(new File(PathUtil.join(pythonFolder.getAbsolutePath(), "inventory.py")), pyStr);
         }
-        
-        String pyStr = pysb.toString();
-        FileUtils.write(new File(PathUtil.join(pythonFolder.getAbsolutePath(), "inventory.py")), pyStr);
-        
-        PythonApiActionGenerator.generatePythonApiAction(basePkgs, pythonFolder.getAbsolutePath());
-        
+
+        // write api_actions.py
+        {
+            PythonApiActionGenerator.generatePythonApiAction(basePkgs, pythonFolder.getAbsolutePath());
+        }
+
         logger.info(String.format("Generated result in %s", folder.getAbsolutePath()));
-        APIGenerateApiJsonTemplateEvent evt = new APIGenerateApiJsonTemplateEvent(msg.getId());
-        bus.publish(evt);
         generatedPythonClassName = null;
     }
 
     private void handle(APISearchDiskOfferingMsg msg) {
-       SearchQuery<DiskOfferingInventory> query = SearchQuery.create(msg, DiskOfferingInventory.class); 
-       String content = query.listAsString();
-       APISearchDiskOfferingReply reply = new APISearchDiskOfferingReply();
-       reply.setContent(content);
-       bus.reply(msg, reply);
+        SearchQuery<DiskOfferingInventory> query = SearchQuery.create(msg, DiskOfferingInventory.class);
+        String content = query.listAsString();
+        APISearchDiskOfferingReply reply = new APISearchDiskOfferingReply();
+        reply.setContent(content);
+        bus.reply(msg, reply);
     }
 
     private void handle(APISearchInstanceOfferingMsg msg) {
@@ -910,7 +947,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
 
         String type = msg.getType() == null ? UserVmInstanceOfferingFactory.type.toString() : msg.getType();
         InstanceOfferingFactory f = getInstanceOfferingFactory(type);
-        
+
         InstanceOfferingVO vo = new InstanceOfferingVO();
         if (msg.getResourceUuid() != null) {
             vo.setUuid(msg.getResourceUuid());
@@ -918,7 +955,7 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             vo.setUuid(Platform.getUuid());
         }
         HostAllocatorStrategyType allocType = msg.getAllocatorStrategy() == null ? HostAllocatorStrategyType
-                .valueOf(HostAllocatorConstant.DEFAULT_HOST_ALLOCATOR_STRATEGY_TYPE) : HostAllocatorStrategyType.valueOf(msg.getAllocatorStrategy());
+                .valueOf(HostAllocatorConstant.LEAST_VM_PREFERRED_HOST_ALLOCATOR_STRATEGY_TYPE) : HostAllocatorStrategyType.valueOf(msg.getAllocatorStrategy());
         vo.setAllocatorStrategy(allocType.toString());
         vo.setName(msg.getName());
         vo.setCpuNum(msg.getCpuNum());
@@ -928,10 +965,16 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         vo.setMemorySize(msg.getMemorySize());
         vo.setDuration(InstanceOfferingDuration.Permanent);
         vo.setType(type);
-        InstanceOfferingInventory inv = f.createInstanceOffering(vo, msg);
 
-        tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), InstanceOfferingVO.class.getSimpleName());
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), InstanceOfferingVO.class);
+        InstanceOfferingInventory inv = new SQLBatchWithReturn<InstanceOfferingInventory>() {
+            @Override
+            protected InstanceOfferingInventory scripts() {
+                InstanceOfferingInventory inv = f.createInstanceOffering(vo, msg);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), InstanceOfferingVO.class);
+                tagMgr.createTagsFromAPICreateMessage(msg, vo.getUuid(), InstanceOfferingVO.class.getSimpleName());
+                return inv;
+            }
+        }.execute();
 
         evt.setInventory(inv);
         bus.publish(evt);
@@ -972,10 +1015,18 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
 
         DiskOfferingFactory f = getDiskOfferingFactory(vo.getType());
-        DiskOfferingInventory inv = f.createDiskOffering(vo, msg);
+
+        DiskOfferingInventory inv = new SQLBatchWithReturn<DiskOfferingInventory>() {
+            @Override
+            protected DiskOfferingInventory scripts() {
+                DiskOfferingInventory inv = f.createDiskOffering(vo, msg);
+                acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), DiskOfferingVO.class);
+
+                return inv;
+            }
+        }.execute();
 
         tagMgr.createTagsFromAPICreateMessage(msg, inv.getUuid(), DiskOfferingVO.class.getSimpleName());
-        acntMgr.createAccountResourceRef(msg.getSession().getAccountUuid(), vo.getUuid(), DiskOfferingVO.class);
 
         APICreateDiskOfferingEvent evt = new APICreateDiskOfferingEvent(msg.getId());
         evt.setInventory(inv);
@@ -1007,17 +1058,21 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
             diskOfferingFactories.put(f.getDiskOfferingType().toString(), f);
         }
 
-        for (PythonApiBindingWriter ext : pluginRgty.getExtensionList(PythonApiBindingWriter.class)) {
+        List<PythonApiBindingWriter> exts = pluginRgty.getExtensionList(PythonApiBindingWriter.class);
+        List<PythonApiBindingWriter> sortedExts = exts.stream().sorted((e1, e2) ->
+                e1.getClass().getName().compareTo(e2.getClass().getName())).collect(Collectors.toList());
+        for (PythonApiBindingWriter ext : sortedExts) {
             pythonApiBindingWriters.add(ext);
         }
+
     }
-    
+
     private InstanceOfferingFactory getInstanceOfferingFactory(String type) {
-    	InstanceOfferingFactory f = instanceOfferingFactories.get(type);
-    	if (f == null) {
-    		throw new IllegalArgumentException(String.format("unable to find InstanceOfferingFactory with type[%s]", type));
-    	}
-    	return f;
+        InstanceOfferingFactory f = instanceOfferingFactories.get(type);
+        if (f == null) {
+            throw new IllegalArgumentException(String.format("unable to find InstanceOfferingFactory with type[%s]", type));
+        }
+        return f;
     }
 
     private DiskOfferingFactory getDiskOfferingFactory(String type) {
@@ -1027,10 +1082,10 @@ public class ConfigurationManagerImpl extends AbstractService implements Configu
         }
         return f;
     }
-    
+
     @Override
     public boolean start() {
-    	populateExtensions();
+        populateExtensions();
         return true;
     }
 

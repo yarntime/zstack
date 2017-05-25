@@ -13,6 +13,7 @@ import org.zstack.core.thread.SyncTaskChain;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
@@ -23,6 +24,8 @@ import org.zstack.header.vm.VmInstanceState;
 import org.zstack.network.service.virtualrouter.VirtualRouterCommands.PingCmd;
 import org.zstack.network.service.virtualrouter.VirtualRouterCommands.PingRsp;
 import org.zstack.network.service.virtualrouter.VirtualRouterConstant.Param;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,13 +43,13 @@ public class VirtualRouter extends ApplianceVmBase {
     }
 
     @Autowired
-    private VirtualRouterManager vrMgr;
+    protected VirtualRouterManager vrMgr;
     @Autowired
-    private RESTFacade restf;
+    protected RESTFacade restf;
     @Autowired
-    private ErrorFacade errf;
+    protected ErrorFacade errf;
 
-    private VirtualRouterVmInventory vr;
+    protected VirtualRouterVmInventory vr;
 
     public VirtualRouter(ApplianceVmVO vo) {
         super(vo);
@@ -92,6 +95,10 @@ public class VirtualRouter extends ApplianceVmBase {
         return vrMgr.getPostMigrateFlows();
     }
 
+    protected FlowChain getReconnectChain() {
+        return vrMgr.getReconnectFlowChain();
+    }
+
     @Override
     protected void handleApiMessage(APIMessage msg) {
         if (msg instanceof APIReconnectVirtualRouterMsg) {
@@ -133,7 +140,7 @@ public class VirtualRouter extends ApplianceVmBase {
 
                 PingCmd cmd = new PingCmd();
                 cmd.setUuid(self.getUuid());
-                restf.asyncJsonPost(vrMgr.buildUrl(vr.getManagementNic().getIp(), VirtualRouterConstant.VR_PING), cmd, new JsonAsyncRESTCallback<PingRsp>(msg, chain) {
+                restf.asyncJsonPost(buildUrl(vr.getManagementNic().getIp(), VirtualRouterConstant.VR_PING), cmd, new JsonAsyncRESTCallback<PingRsp>(msg, chain) {
                     @Override
                     public void fail(ErrorCode err) {
                         reply.setDoReconnect(true);
@@ -219,6 +226,10 @@ public class VirtualRouter extends ApplianceVmBase {
         });
     }
 
+    protected String buildUrl(String mgmtIp, String path) {
+        return vrMgr.buildUrl(mgmtIp, path);
+    }
+
     private void handle(final VirtualRouterAsyncHttpCallMsg msg) {
         thdf.chainSubmit(new ChainTask(msg) {
             @Override
@@ -228,16 +239,20 @@ public class VirtualRouter extends ApplianceVmBase {
 
             @Override
             public void run(final SyncTaskChain chain) {
+                refreshVO();
+
                 final VirtualRouterAsyncHttpCallReply reply = new VirtualRouterAsyncHttpCallReply();
-                if (msg.isCheckStatus() && getSelf().getStatus() != ApplianceVmStatus.Connected) {
-                    reply.setError(errf.stringToOperationError(String.format("virtual router[uuid:%s] is in status of %s that cannot make http call to %s",
-                            self.getUuid(), getSelf().getStatus(), msg.getPath())));
-                    bus.reply(msg, reply);
-                    chain.next();
-                    return;
+                if (msg.isCheckStatus() && getSelf().getState() != VmInstanceState.Running) {
+                    throw new OperationFailureException(operr("the virtual router[name:%s, uuid:%s, current state:%s] is not running," +
+                                    "and cannot perform required operation. Please retry your operation later once it is running", self.getName(), self.getUuid(), self.getState()));
                 }
 
-                restf.asyncJsonPost(vrMgr.buildUrl(vr.getManagementNic().getIp(), msg.getPath()), msg.getCommand(), new JsonAsyncRESTCallback<LinkedHashMap>(msg, chain) {
+                if (msg.isCheckStatus() && getSelf().getStatus() != ApplianceVmStatus.Connected) {
+                    throw new OperationFailureException(operr("virtual router[uuid:%s] is in status of %s that cannot make http call to %s",
+                            self.getUuid(), getSelf().getStatus(), msg.getPath()));
+                }
+
+                restf.asyncJsonPost(buildUrl(vr.getManagementNic().getIp(), msg.getPath()), msg.getCommand(), new JsonAsyncRESTCallback<LinkedHashMap>(msg, chain) {
                     @Override
                     public void fail(ErrorCode err) {
                         reply.setError(err);
@@ -285,7 +300,7 @@ public class VirtualRouter extends ApplianceVmBase {
                 refreshVO();
                 ErrorCode allowed = validateOperationByState(msg, self.getState(), SysErrors.OPERATION_ERROR);
                 if (allowed != null) {
-                    evt.setErrorCode(allowed);
+                    evt.setError(allowed);
                     bus.publish(evt);
                     chain.next();
                     return;
@@ -301,7 +316,7 @@ public class VirtualRouter extends ApplianceVmBase {
 
                     @Override
                     public void fail(ErrorCode errorCode) {
-                        evt.setErrorCode(errorCode);
+                        evt.setError(errorCode);
                         bus.publish(evt);
                         chain.next();
                     }
@@ -316,7 +331,7 @@ public class VirtualRouter extends ApplianceVmBase {
     }
 
     private void reconnect(final Completion completion) {
-        FlowChain chain = vrMgr.getReconnectFlowChain();
+        FlowChain chain = getReconnectChain();
         chain.setName(String.format("reconnect-virtual-router-%s", self.getUuid()));
         chain.getData().put(VirtualRouterConstant.Param.VR.toString(), vr);
         chain.getData().put(Param.IS_RECONNECT.toString(), Boolean.TRUE.toString());
@@ -341,7 +356,7 @@ public class VirtualRouter extends ApplianceVmBase {
             }
 
             @Override
-            public void rollback(FlowTrigger trigger, Map data) {
+            public void rollback(FlowRollback trigger, Map data) {
                 self = dbf.reload(self);
                 getSelf().setStatus(ApplianceVmStatus.Disconnected);
                 self = dbf.updateAndRefresh(self);

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="120">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb"/>
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb1"/>
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb2"/>
@@ -18,5 +18,7 @@
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb16"/>
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb17"/>
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLb18"/>
+    <TestCase class="org.zstack.test.lb.TestVirtualRouterLb19"/>
+    <TestCase class="org.zstack.test.lb.TestVirtualRouterLb20"/>
     <TestCase class="org.zstack.test.lb.TestVirtualRouterLbPolicy"/>
 </UnitTestSuiteConfig>

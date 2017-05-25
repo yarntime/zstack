@@ -6,8 +6,11 @@ import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusListCallBack;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.SimpleQuery.Op;
+import org.zstack.core.db.UpdateQuery;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudRuntimeException;
@@ -16,7 +19,10 @@ import org.zstack.header.message.MessageReply;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceSpec;
 import org.zstack.header.vm.VmInstanceSpec.VolumeSpec;
+import org.zstack.header.vm.VmInstanceVO;
+import org.zstack.header.vm.VmInstanceVO_;
 import org.zstack.header.volume.*;
+import org.zstack.header.volume.VolumeDeletionPolicyManager.VolumeDeletionPolicy;
 import org.zstack.identity.AccountManager;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.function.Function;
@@ -24,6 +30,8 @@ import org.zstack.utils.function.Function;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import static org.zstack.core.progress.ProgressReportService.taskProgress;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class VmAllocateVolumeFlow implements Flow {
@@ -37,6 +45,8 @@ public class VmAllocateVolumeFlow implements Flow {
     protected ErrorFacade errf;
 
     private List<CreateVolumeMsg> prepareMsg(Map<String, Object> ctx) {
+        taskProgress("create volumes");
+
         VmInstanceSpec spec = (VmInstanceSpec) ctx.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
 
         String accountUuid = acntMgr.getOwnerAccountUuidOfResource(spec.getVmInventory().getUuid());
@@ -45,7 +55,7 @@ public class VmAllocateVolumeFlow implements Flow {
         }
 
         List<VolumeSpec> volumeSpecs = spec.getVolumeSpecs();
-        List<CreateVolumeMsg> msgs = new ArrayList<CreateVolumeMsg>(volumeSpecs.size());
+        List<CreateVolumeMsg> msgs = new ArrayList<>(volumeSpecs.size());
         for (VolumeSpec vspec : volumeSpecs) {
             CreateVolumeMsg msg = new CreateVolumeMsg();
             if (vspec.isRoot()) {
@@ -59,7 +69,7 @@ public class VmAllocateVolumeFlow implements Flow {
                     msg.setFormat(imageFormat.getOutputFormat(spec.getDestHost().getHypervisorType()));
                 }
             } else {
-                msg.setName("DATA");
+                msg.setName(String.format("DATA-for-%s", spec.getVmInventory().getName()));
                 msg.setDescription(String.format("DataVolume-%s", spec.getVmInventory().getUuid()));
                 msg.setFormat(VolumeFormat.getVolumeFormatByMasterHypervisorType(spec.getDestHost().getHypervisorType()).toString());
             }
@@ -86,16 +96,25 @@ public class VmAllocateVolumeFlow implements Flow {
             public void run(List<MessageReply> replies) {
                 ErrorCode err = null;
                 for (MessageReply r : replies) {
+                    VolumeSpec vspec = spec.getVolumeSpecs().get(replies.indexOf(r));
+
                     if (r.isSuccess()) {
                         CreateVolumeReply cr = r.castReply();
                         VolumeInventory inv = cr.getInventory();
                         if (inv.getType().equals(VolumeType.Root.toString())) {
+                            UpdateQuery.New(VmInstanceVO.class)
+                                    .set(VmInstanceVO_.rootVolumeUuid, inv.getUuid())
+                                    .condAnd(VmInstanceVO_.uuid, Op.EQ, spec.getVmInventory().getUuid())
+                                    .update();
                             spec.setDestRootVolume(inv);
                         } else {
                             spec.getDestDataVolumes().add(inv);
                         }
+
+                        vspec.setIsVolumeCreated(true);
                     } else {
                         err = r.getError();
+                        vspec.setIsVolumeCreated(false);
                     }
                 }
 
@@ -109,9 +128,9 @@ public class VmAllocateVolumeFlow implements Flow {
     }
 
     @Override
-    public void rollback(final FlowTrigger chain, Map data) {
+    public void rollback(final FlowRollback chain, Map data) {
         VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
-        List<VolumeInventory> destVolumes = new ArrayList<VolumeInventory>(spec.getDestDataVolumes().size() + 1);
+        List<VolumeInventory> destVolumes = new ArrayList<>(spec.getDestDataVolumes().size() + 1);
         if (spec.getDestRootVolume() != null) {
             destVolumes.add(spec.getDestRootVolume());
         }
@@ -121,6 +140,7 @@ public class VmAllocateVolumeFlow implements Flow {
             @Override
             public DeleteVolumeMsg call(VolumeInventory arg) {
                 DeleteVolumeMsg msg = new DeleteVolumeMsg();
+                msg.setDeletionPolicy(VolumeDeletionPolicy.Direct.toString());
                 msg.setUuid(arg.getUuid());
                 // don't do detach; because the VM is in state of Starting, it cannot do a detach operation.
                 msg.setDetachBeforeDeleting(false);

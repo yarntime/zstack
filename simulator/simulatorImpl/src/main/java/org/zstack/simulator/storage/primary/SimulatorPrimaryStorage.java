@@ -2,7 +2,7 @@ package org.zstack.simulator.storage.primary;
 
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
-import org.zstack.header.message.Message;
+import org.zstack.header.simulator.SimulatorConstant;
 import org.zstack.header.storage.primary.*;
 import org.zstack.header.storage.primary.VolumeSnapshotCapability.VolumeSnapshotArrangementType;
 import org.zstack.header.volume.VolumeInventory;
@@ -10,6 +10,7 @@ import org.zstack.storage.primary.PrimaryStorageBase;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtils;
+
 
 public class SimulatorPrimaryStorage extends PrimaryStorageBase {
     private static final CLogger logger = Utils.getLogger(SimulatorPrimaryStorage.class);
@@ -48,9 +49,10 @@ public class SimulatorPrimaryStorage extends PrimaryStorageBase {
         return vol;
     }
 
-    private void handle(InstantiateRootVolumeFromTemplateMsg msg) {
-        InstantiateVolumeReply reply = new InstantiateVolumeReply();
+    private void handle(InstantiateRootVolumeFromTemplateOnPrimaryStorageMsg msg) {
+        InstantiateVolumeOnPrimaryStorageReply reply = new InstantiateVolumeOnPrimaryStorageReply();
         VolumeInventory vol = instantiateVolume(msg.getVolume());
+        vol.setFormat(SimulatorConstant.SIMULATOR_VOLUME_FORMAT_STRING);
         reply.setVolume(vol);
         logger.debug(String.format("Successfully created root volume[uuid:%s] on primary storage[uuid:%s]", msg.getVolume().getUuid(),
                 msg.getPrimaryStorageUuid()));
@@ -65,12 +67,13 @@ public class SimulatorPrimaryStorage extends PrimaryStorageBase {
     }
 
     @Override
-    protected void handle(InstantiateVolumeMsg msg) {
-        if (msg.getClass() == InstantiateRootVolumeFromTemplateMsg.class) {
-            handle((InstantiateRootVolumeFromTemplateMsg) msg);
+    protected void handle(InstantiateVolumeOnPrimaryStorageMsg msg) {
+        if (msg.getClass() == InstantiateRootVolumeFromTemplateOnPrimaryStorageMsg.class) {
+            handle((InstantiateRootVolumeFromTemplateOnPrimaryStorageMsg) msg);
         } else {
-            InstantiateVolumeReply reply = new InstantiateVolumeReply();
+            InstantiateVolumeOnPrimaryStorageReply reply = new InstantiateVolumeOnPrimaryStorageReply();
             VolumeInventory vol = instantiateVolume(msg.getVolume());
+            vol.setFormat(SimulatorConstant.SIMULATOR_VOLUME_FORMAT_STRING);
             reply.setVolume(vol);
             logger.debug(String.format("Successfully created data volume[uuid:%s] on primary storage[uuid:%s]", msg.getVolume().getUuid(),
                     msg.getPrimaryStorageUuid()));
@@ -121,7 +124,47 @@ public class SimulatorPrimaryStorage extends PrimaryStorageBase {
     }
 
     @Override
-    protected void connectHook(ConnectPrimaryStorageMsg msg, Completion completion) {
+    protected void handle(SyncVolumeSizeOnPrimaryStorageMsg msg) {
+        SyncVolumeSizeOnPrimaryStorageReply reply = new SyncVolumeSizeOnPrimaryStorageReply();
+        reply.setActualSize(0);
+        bus.reply(msg, reply);
+    }
+
+    @Override
+    protected void handle(MergeVolumeSnapshotOnPrimaryStorageMsg msg) {
+        MergeVolumeSnapshotOnPrimaryStorageReply reply = new MergeVolumeSnapshotOnPrimaryStorageReply();
+        reply.setSuccess(true);
+        bus.reply(msg, reply);
+    }
+
+    @Override
+    protected void handle(DeleteSnapshotOnPrimaryStorageMsg msg) {
+        DeleteSnapshotOnPrimaryStorageReply reply = new DeleteSnapshotOnPrimaryStorageReply();
+        reply.setSuccess(true);
+        bus.reply(msg, reply);
+    }
+
+    @Override
+    protected void handle(RevertVolumeFromSnapshotOnPrimaryStorageMsg msg) {
+        RevertVolumeFromSnapshotOnPrimaryStorageReply reply = new RevertVolumeFromSnapshotOnPrimaryStorageReply();
+        reply.setSuccess(true);
+        bus.reply(msg, reply);
+    }
+
+    @Override
+    protected void handle(ReInitRootVolumeFromTemplateOnPrimaryStorageMsg msg) {
+        ReInitRootVolumeFromTemplateOnPrimaryStorageReply reply = new ReInitRootVolumeFromTemplateOnPrimaryStorageReply();
+        reply.setSuccess(true);
+        bus.reply(msg, reply);
+    }
+
+    @Override
+    protected void connectHook(ConnectParam param, Completion completion) {
+        completion.success();
+    }
+
+    @Override
+    protected void pingHook(Completion completion) {
         completion.success();
     }
 

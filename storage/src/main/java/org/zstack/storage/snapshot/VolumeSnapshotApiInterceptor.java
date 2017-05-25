@@ -6,10 +6,10 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
 import org.zstack.header.apimediator.ApiMessageInterceptor;
 import org.zstack.header.apimediator.StopRoutingException;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.storage.backup.BackupStorageZoneRefVO;
 import org.zstack.header.storage.backup.BackupStorageZoneRefVO_;
@@ -17,6 +17,9 @@ import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.header.storage.primary.PrimaryStorageVO_;
 import org.zstack.header.storage.snapshot.*;
 import org.zstack.header.volume.*;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.Tuple;
 import java.util.List;
@@ -55,6 +58,8 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
             validate((APIRevertVolumeFromSnapshotMsg) msg);
         } else if (msg instanceof APIDeleteVolumeSnapshotFromBackupStorageMsg) {
             validate((APIDeleteVolumeSnapshotFromBackupStorageMsg) msg);
+        } else if (msg instanceof APICreateVolumeSnapshotSchedulerMsg) {
+            validate((APICreateVolumeSnapshotSchedulerMsg) msg);
         } else if (msg instanceof APICreateVolumeSnapshotMsg) {
             validate((APICreateVolumeSnapshotMsg) msg);
         } else if (msg instanceof APIGetVolumeSnapshotTreeMsg) {
@@ -74,9 +79,7 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
         q.add(VolumeSnapshotVO_.uuid, Op.EQ, msg.getUuid());
         String priUuid = q.findValue();
         if (priUuid == null) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("volume snapshot[uuid:%s] is not on primary storage, cannot be backed up", msg.getUuid())
-            ));
+            throw new ApiMessageInterceptionException(operr("volume snapshot[uuid:%s] is not on primary storage, cannot be backed up", msg.getUuid()));
         }
 
         if (msg.getBackupStorageUuid() != null) {
@@ -84,9 +87,7 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
             rq.add(VolumeSnapshotBackupStorageRefVO_.volumeSnapshotUuid, Op.EQ, msg.getUuid());
             rq.add(VolumeSnapshotBackupStorageRefVO_.backupStorageUuid, Op.EQ, msg.getBackupStorageUuid());
             if (rq.isExists()) {
-                throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                        String.format("volume snapshot[uuid:%s] is already on backup storage[uuid: %s]", msg.getUuid(), msg.getBackupStorageUuid())
-                ));
+                throw new ApiMessageInterceptionException(operr("volume snapshot[uuid:%s] is already on backup storage[uuid: %s]", msg.getUuid(), msg.getBackupStorageUuid()));
             }
 
             SimpleQuery<PrimaryStorageVO> pq = dbf.createQuery(PrimaryStorageVO.class);
@@ -98,19 +99,15 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
             brq.add(BackupStorageZoneRefVO_.zoneUuid, Op.EQ, zoneUuid);
             brq.add(BackupStorageZoneRefVO_.backupStorageUuid, Op.EQ, msg.getBackupStorageUuid());
             if (!brq.isExists()) {
-                throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                        String.format(String.format("volume snapshot[uuid:%s] is on primary storage[uuid:%s] which is in zone[uuid:%s] that backup storage[uuid:%s] is not attached to",
-                                msg.getUuid(), priUuid, zoneUuid, msg.getBackupStorageUuid()))
-                ));
+                throw new ApiMessageInterceptionException(operr("volume snapshot[uuid:%s] is on primary storage[uuid:%s] which is in zone[uuid:%s] that backup storage[uuid:%s] is not attached to",
+                                msg.getUuid(), priUuid, zoneUuid, msg.getBackupStorageUuid()));
             }
         }
     }
 
     private void validate(APIGetVolumeSnapshotTreeMsg msg) {
         if (msg.getTreeUuid() == null && msg.getVolumeUuid() == null) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("either volumeUuid or treeUuid must be set")
-            ));
+            throw new ApiMessageInterceptionException(argerr("either volumeUuid or treeUuid must be set"));
         }
     }
 
@@ -120,9 +117,17 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
         q.add(VolumeVO_.uuid, Op.EQ, msg.getVolumeUuid());
         VolumeStatus status = q.findValue();
         if (status != VolumeStatus.Ready) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("volume[uuid:%s] is not in status Ready, current is %s, can't create snapshot", msg.getVolumeUuid(), status)
-            ));
+            throw new ApiMessageInterceptionException(operr("volume[uuid:%s] is not in status Ready, current is %s, can't create snapshot", msg.getVolumeUuid(), status));
+        }
+    }
+
+    private void validate(APICreateVolumeSnapshotSchedulerMsg msg) {
+        SimpleQuery<VolumeVO> q = dbf.createQuery(VolumeVO.class);
+        q.select(VolumeVO_.status);
+        q.add(VolumeVO_.uuid, Op.EQ, msg.getVolumeUuid());
+        VolumeStatus status = q.findValue();
+        if (status != VolumeStatus.Ready) {
+            throw new ApiMessageInterceptionException(operr("volume[uuid:%s] is not in status Ready, current is %s, can't create snapshot", msg.getVolumeUuid(), status));
         }
     }
 
@@ -149,16 +154,12 @@ public class VolumeSnapshotApiInterceptor implements ApiMessageInterceptor {
         Tuple t = q.findTuple();
         VolumeSnapshotState state = t.get(0, VolumeSnapshotState.class);
         if (state != VolumeSnapshotState.Enabled) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("volume snapshot[uuid:%s] is in state %s, cannot revert volume to it", msg.getUuid(), state)
-            ));
+            throw new ApiMessageInterceptionException(operr("volume snapshot[uuid:%s] is in state %s, cannot revert volume to it", msg.getUuid(), state));
         }
 
-        String volUuid =  t.get(1, String.class);
+        String volUuid = t.get(1, String.class);
         if (volUuid == null) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("original volume for snapshot[uuid:%s] has been deleted, cannot revert volume to it", msg.getUuid())
-            ));
+            throw new ApiMessageInterceptionException(operr("original volume for snapshot[uuid:%s] has been deleted, cannot revert volume to it", msg.getUuid()));
         }
     }
 

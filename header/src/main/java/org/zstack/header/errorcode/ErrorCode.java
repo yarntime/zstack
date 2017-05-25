@@ -1,8 +1,11 @@
 package org.zstack.header.errorcode;
 
 import org.zstack.header.exception.CloudRuntimeException;
+import org.zstack.utils.gson.JSONObjectUtil;
 
 import java.io.Serializable;
+import java.util.LinkedHashMap;
+import java.util.List;
 
 public class ErrorCode implements Serializable, Cloneable {
     private String code;
@@ -10,6 +13,26 @@ public class ErrorCode implements Serializable, Cloneable {
     private String details;
     private String elaboration;
     private ErrorCode cause;
+    private LinkedHashMap opaque;
+
+    public LinkedHashMap getOpaque() {
+        return opaque;
+    }
+
+    public void setOpaque(LinkedHashMap opaque) {
+        this.opaque = opaque;
+    }
+
+    public void putToOpaque(String key, Object value) {
+        if (opaque == null) {
+            opaque = new LinkedHashMap();
+        }
+        opaque.put(key, value);
+    }
+
+    public Object getFromOpaque(String key) {
+        return opaque == null ? null : opaque.get(key);
+    }
 
     public ErrorCode() {
     }
@@ -19,12 +42,20 @@ public class ErrorCode implements Serializable, Cloneable {
         this.code = code;
         this.description = description;
     }
-    
+
     public ErrorCode(String code, String description, String details) {
         super();
         this.code = code;
         this.description = description;
         this.details = details;
+    }
+
+    public ErrorCode(ErrorCode other) {
+        this.code = other.code;
+        this.description = other.description;
+        this.details = other.details;
+        this.elaboration = other.elaboration;
+        this.cause = other.cause;
     }
 
     public void setCode(String code) {
@@ -38,7 +69,7 @@ public class ErrorCode implements Serializable, Cloneable {
     public String getCode() {
         return code;
     }
-    
+
     public String getDescription() {
         return description;
     }
@@ -50,7 +81,7 @@ public class ErrorCode implements Serializable, Cloneable {
     public void setDetails(String details) {
         this.details = details;
     }
-    
+
     public ErrorCode copy() {
         try {
             return (ErrorCode) this.clone();
@@ -58,12 +89,12 @@ public class ErrorCode implements Serializable, Cloneable {
             throw new CloudRuntimeException(e);
         }
     }
-    
+
     @Override
     public String toString() {
-        return String.format("ErrorCode [code = %s, description = %s, details = %s]", this.getCode(), this.getDescription(), this.getDetails());
+        return JSONObjectUtil.toJsonString(this);
     }
-    
+
     public static ErrorCode fromString(String err) {
         String arr = err.replace("ErrorCode", "").replace("[", "").replace("]", "").trim();
         try {
@@ -84,11 +115,31 @@ public class ErrorCode implements Serializable, Cloneable {
         this.cause = cause;
     }
 
+    public ErrorCode causedBy(ErrorCode cause) {
+        setCause(cause);
+        return this;
+    }
+
+    public ErrorCode causedBy(List<ErrorCode> cause) {
+        ((ErrorCodeList) this).setCauses(cause);
+        return this;
+    }
+
     public String getElaboration() {
         return elaboration;
     }
 
     public void setElaboration(String elaboration) {
         this.elaboration = elaboration;
+    }
+
+    public boolean isError(Enum... errorEnums) {
+        for (Enum e : errorEnums) {
+            if (e.toString().equals(getCode())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

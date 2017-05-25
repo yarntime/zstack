@@ -12,10 +12,7 @@ import org.zstack.header.simulator.SimulatorConstant;
 import org.zstack.header.simulator.storage.backup.SimulatorBackupStorageDetails;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageVO;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.function.Function;
@@ -31,7 +28,7 @@ public class TestListImage {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml").addXml("BackupStorageManager.xml")
                 .addXml("ImageManager.xml").addXml("AccountManager.xml").build();
@@ -65,10 +62,10 @@ public class TestListImage {
             iinv.setUrl(String.format("http://zstack.org/download/%s/win7.qcow2", i));
             api.addImage(iinv, inv.getUuid());
         }
-        
+
         List<ImageInventory> images = api.listImage(null);
         Assert.assertEquals(testNum, images.size());
-        
+
         List<String> uuids = CollectionUtils.transformToList(images, new Function<String, ImageInventory>() {
             @Override
             public String call(ImageInventory arg) {
@@ -76,7 +73,7 @@ public class TestListImage {
             }
         });
         images = api.listImage(uuids);
-        for (int i=0; i<testNum; i++) {
+        for (int i = 0; i < testNum; i++) {
             Assert.assertEquals(uuids.get(i), images.get(i).getUuid());
         }
     }

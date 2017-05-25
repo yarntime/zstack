@@ -7,6 +7,7 @@ import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.core.workflow.*;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
@@ -14,8 +15,6 @@ import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
-import org.zstack.header.identity.AccountResourceRefVO;
-import org.zstack.header.identity.AccountResourceRefVO_;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.vm.*;
@@ -26,6 +25,8 @@ import org.zstack.network.service.virtualrouter.VirtualRouterCommands.*;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,19 +34,19 @@ import java.util.Map;
 
 import static org.zstack.utils.CollectionDSL.list;
 
-public class VirtualRouterVipBackend implements VipBackend {
+public class VirtualRouterVipBackend extends AbstractVirtualRouterBackend implements VipBackend {
     private static final CLogger logger = Utils.getLogger(VirtualRouterVipBackend.class);
 
     @Autowired
     private CloudBus bus;
-    @Autowired
-    protected VirtualRouterManager vrMgr;
     @Autowired
     protected DatabaseFacade dbf;
     @Autowired
     protected PluginRegistry pluginRgty;
     @Autowired
     protected ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     private String getOwnerMac(VirtualRouterVmInventory vr, VipInventory vip) {
         for (VmNicInventory nic : vr.getVmNics()) {
@@ -72,6 +73,7 @@ public class VirtualRouterVipBackend implements VipBackend {
         VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setPath(VirtualRouterConstant.VR_CREATE_VIP);
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -85,9 +87,8 @@ public class VirtualRouterVipBackend implements VipBackend {
                 VirtualRouterAsyncHttpCallReply re = reply.castReply();
                 CreateVipRsp ret = re.toResponse(CreateVipRsp.class);
                 if (!ret.isSuccess()) {
-                    String err = String.format("failed to create vip%s on virtual router[uuid:%s], because %s", tos, vr.getUuid(), ret.getError());
-                    logger.warn(err);
-                    completion.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("failed to create vip%s on virtual router[uuid:%s], because %s", tos, vr.getUuid(), ret.getError());
+                    completion.fail(err);
                 } else {
                     completion.success();
                 }
@@ -115,6 +116,7 @@ public class VirtualRouterVipBackend implements VipBackend {
         VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
         msg.setPath(VirtualRouterConstant.VR_REMOVE_VIP);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setVmInstanceUuid(vr.getUuid());
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(completion) {
@@ -130,9 +132,8 @@ public class VirtualRouterVipBackend implements VipBackend {
                 if (ret.isSuccess()) {
                     completion.success();
                 } else {
-                    String err = String.format("failed to remove vip%s, because %s", tos, ret.getError());
-                    logger.warn(err);
-                    completion.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("failed to remove vip%s, because %s", tos, ret.getError());
+                    completion.fail(err);
                 }
             }
         });
@@ -167,10 +168,8 @@ public class VirtualRouterVipBackend implements VipBackend {
             q.add(VmInstanceVO_.uuid, SimpleQuery.Op.EQ, vipvo.getVirtualRouterVmUuid());
             VmInstanceState vrState = q.findValue();
             if (VmInstanceState.Running != vrState) {
-                completion.fail(errf.stringToOperationError(
-                        String.format("virtual router[uuid:%s, state:%s] is not running, current HA has not been supported, please manually start this virtual router",
-                                vipvo.getVirtualRouterVmUuid(), vrState)
-                ));
+                completion.fail(operr("virtual router[uuid:%s, state:%s] is not running, current HA has not been supported, please manually start this virtual router",
+                                vipvo.getVirtualRouterVmUuid(), vrState));
             } else {
                 completion.success();
             }
@@ -183,17 +182,19 @@ public class VirtualRouterVipBackend implements VipBackend {
         chain.then(new NoRollbackFlow() {
             @Override
             public void run(final FlowTrigger trigger, final Map data) {
-                vrMgr.acquireVirtualRouterVm(guestNw, new VirtualRouterOfferingValidator() {
+                VirtualRouterStruct s = new VirtualRouterStruct();
+                s.setL3Network(guestNw);
+                s.setOfferingValidator(new VirtualRouterOfferingValidator() {
                     @Override
                     public void validate(VirtualRouterOfferingInventory offering) throws OperationFailureException {
                         if (!offering.getPublicNetworkUuid().equals(vip.getL3NetworkUuid())) {
-                            throw new OperationFailureException(errf.stringToOperationError(
-                                    String.format("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to VIP[uuid:%s]'s; you may need to use system tag" +
-                                            " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), guestNw.getUuid(), guestNw.getZoneUuid(), vip.getL3NetworkUuid(), vip.getUuid())
-                            ));
+                            throw new OperationFailureException(operr("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to VIP[uuid:%s]'s; you may need to use system tag" +
+                                            " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), guestNw.getUuid(), guestNw.getZoneUuid(), vip.getL3NetworkUuid(), vip.getUuid()));
                         }
                     }
-                }, new ReturnValueCompletion<VirtualRouterVmInventory>(trigger){
+                });
+
+                acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(trigger){
                     @Override
                     public void success(VirtualRouterVmInventory returnValue) {
                         data.put(VirtualRouterConstant.Param.VR.toString(), returnValue);
@@ -283,8 +284,7 @@ public class VirtualRouterVipBackend implements VipBackend {
                 logger.warn(String.format("failed to release vip[uuid:%s, name:%s, ip:%s] on virtual router vm[uuid:%s], because %s",
                         vip.getUuid(), vip.getName(), vip.getIp(),
                         vrvo.getUuid(), errorCode));
-                //TODO: garbage collector
-                completion.success();
+                completion.fail(errorCode);
             }
         });
     }

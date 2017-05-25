@@ -9,9 +9,12 @@ import org.zstack.header.core.workflow.NoRollbackFlow;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.storage.primary.PrimaryStorageAllocationSpec;
 import org.zstack.header.storage.primary.PrimaryStorageConstant.AllocatorParams;
+import org.zstack.header.storage.primary.PrimaryStorageOverProvisioningManager;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.SizeUtils;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +26,8 @@ import java.util.Map;
 public class PrimaryStorageReservedCapacityAllocatorFlow extends NoRollbackFlow {
     @Autowired
     protected ErrorFacade errf;
+    @Autowired
+    protected PrimaryStorageOverProvisioningManager psRatioMgr;
 
     @Override
     public void run(FlowTrigger trigger, Map data) {
@@ -33,16 +38,15 @@ public class PrimaryStorageReservedCapacityAllocatorFlow extends NoRollbackFlow 
         long reservedCapacity = SizeUtils.sizeStringToBytes(PrimaryStorageGlobalConfig.RESERVED_CAPACITY.value());
         List<PrimaryStorageVO> ret = new ArrayList<PrimaryStorageVO>(candidates.size());
         for (PrimaryStorageVO vo : candidates) {
-            if (vo.getCapacity().getAvailableCapacity() - reservedCapacity > spec.getSize()) {
+            if (vo.getCapacity().getAvailableCapacity() -
+                    psRatioMgr.calculateByRatio(vo.getUuid(), spec.getSize()) >= reservedCapacity) {
                 ret.add(vo);
             }
         }
 
         if (ret.isEmpty()) {
-            throw new OperationFailureException(errf.stringToOperationError(
-                    String.format("after subtracting reserved capacity[%s], there is no primary storage having required size[%s bytes]",
-                            PrimaryStorageGlobalConfig.RESERVED_CAPACITY.value(), spec.getSize())
-            ));
+            throw new OperationFailureException(operr("after subtracting reserved capacity[%s], there is no primary storage having required size[%s bytes]",
+                            PrimaryStorageGlobalConfig.RESERVED_CAPACITY.value(), spec.getSize()));
         }
 
         data.put(AllocatorParams.CANDIDATES, ret);

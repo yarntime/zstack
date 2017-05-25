@@ -47,7 +47,7 @@ public class TestListApplianceVm {
         dbf = loader.getComponent(DatabaseFacade.class);
         apvmf = loader.getComponent(ApplianceVmFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         ApplianceVmSpec spec = new ApplianceVmSpec();
@@ -81,7 +81,7 @@ public class TestListApplianceVm {
         nic2.setL3NetworkUuid(l33.getUuid());
         spec.getAdditionalNics().add(nic2);
 
-        apvmf.createApplianceVm(spec, new ReturnValueCompletion<ApplianceVmInventory>() {
+        apvmf.createApplianceVm(spec, new ReturnValueCompletion<ApplianceVmInventory>(null) {
             private VmNicInventory findNic(List<VmNicInventory> lst, String l3Uuid) {
                 for (VmNicInventory nic : lst) {
                     if (l3Uuid.equals(nic.getL3NetworkUuid())) {

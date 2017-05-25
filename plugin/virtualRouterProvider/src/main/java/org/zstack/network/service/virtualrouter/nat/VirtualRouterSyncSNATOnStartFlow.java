@@ -6,8 +6,10 @@ import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.core.workflow.NoRollbackFlow;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.service.NetworkServiceType;
 import org.zstack.header.vm.VmInstanceConstant;
@@ -18,6 +20,8 @@ import org.zstack.network.service.virtualrouter.VirtualRouterCommands.SyncSNATRs
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +37,8 @@ public class VirtualRouterSyncSNATOnStartFlow extends NoRollbackFlow {
 	private VirtualRouterManager vrMgr;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     @Override
     public void run(final FlowTrigger chain, Map data) {
@@ -69,6 +75,7 @@ public class VirtualRouterSyncSNATOnStartFlow extends NoRollbackFlow {
         VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
         msg.setPath(VirtualRouterConstant.VR_SYNC_SNAT_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         msg.setVmInstanceUuid(vr.getUuid());
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(chain) {
@@ -82,11 +89,9 @@ public class VirtualRouterSyncSNATOnStartFlow extends NoRollbackFlow {
                 VirtualRouterAsyncHttpCallReply re = reply.castReply();
                 SyncSNATRsp ret = re.toResponse(SyncSNATRsp.class);
                 if (!ret.isSuccess()) {
-                    String err = String
-                            .format("virtual router[name: %s, uuid: %s] failed to sync snat%s, %s",
-                                    vr.getName(), vr.getUuid(), JSONObjectUtil.toJsonString(snatInfo), ret.getError());
-                    logger.warn(err);
-                    chain.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("virtual router[name: %s, uuid: %s] failed to sync snat%s, %s",
+                            vr.getName(), vr.getUuid(), JSONObjectUtil.toJsonString(snatInfo), ret.getError());
+                    chain.fail(err);
                 } else {
                     chain.next();
                 }

@@ -1,4 +1,3 @@
-
 package org.zstack.header.identity;
 
 import org.zstack.header.configuration.PythonClassInventory;
@@ -7,6 +6,7 @@ import org.zstack.header.query.ExpandedQueries;
 import org.zstack.header.query.ExpandedQuery;
 import org.zstack.header.query.ExpandedQueryAlias;
 import org.zstack.header.query.ExpandedQueryAliases;
+import org.zstack.header.rest.SDK;
 import org.zstack.header.search.Inventory;
 import org.zstack.utils.gson.JSONObjectUtil;
 
@@ -20,15 +20,16 @@ import java.util.List;
         @ExpandedQuery(expandedField = "account", inventoryClass = AccountInventory.class,
                 foreignKey = "accountUuid", expandedInventoryKey = "uuid"),
         @ExpandedQuery(expandedField = "groupRef", inventoryClass = UserGroupPolicyRefInventory.class,
-                foreignKey = "uuid", expandedInventoryKey = "groupUuid", hidden = true),
+                foreignKey = "uuid", expandedInventoryKey = "policyUuid", hidden = true),
         @ExpandedQuery(expandedField = "userRef", inventoryClass = UserPolicyRefInventory.class,
-                foreignKey = "uuid", expandedInventoryKey = "userUuid", hidden = true)
+                foreignKey = "uuid", expandedInventoryKey = "policyUuid", hidden = true)
 })
 @ExpandedQueryAliases({
         @ExpandedQueryAlias(alias = "group", expandedField = "groupRef.group"),
         @ExpandedQueryAlias(alias = "user", expandedField = "userRef.user")
 })
 public class PolicyInventory {
+    @SDK(sdkClassName = "PolicyStatement")
     public static class Statement {
         private String name;
         private StatementEffect effect;

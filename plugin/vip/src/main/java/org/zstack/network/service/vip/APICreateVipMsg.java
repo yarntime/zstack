@@ -1,13 +1,13 @@
 package org.zstack.network.service.vip;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APICreateMessage;
-import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
 import org.zstack.header.network.l3.IpAllocateMessage;
-import org.zstack.header.network.l3.L3Network;
 import org.zstack.header.network.l3.L3NetworkMessage;
 import org.zstack.header.network.l3.L3NetworkVO;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * @api
@@ -49,6 +49,12 @@ import org.zstack.header.network.l3.L3NetworkVO;
  * see :ref:`APICreateVipEvent`
  */
 @Action(category = VipConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/vips",
+        method = HttpMethod.POST,
+        responseClass = APICreateVipEvent.class,
+        parameterName = "params"
+)
 public class APICreateVipMsg extends APICreateMessage implements L3NetworkMessage, IpAllocateMessage {
     /**
      * @desc max length of 255 characters
@@ -114,4 +120,13 @@ public class APICreateVipMsg extends APICreateMessage implements L3NetworkMessag
     public void setDescription(String description) {
         this.description = description;
     }
+ 
+    public static APICreateVipMsg __example__() {
+        APICreateVipMsg msg = new APICreateVipMsg();
+        msg.setName("vip1");
+        msg.setL3NetworkUuid(uuid());
+        msg.setRequiredIp("10.0.0.2");
+        return msg;
+    }
+
 }

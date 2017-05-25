@@ -1,6 +1,5 @@
 package org.zstack.header.network.l3;
 
-import org.zstack.header.search.SqlTrigger;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 
@@ -9,49 +8,53 @@ import java.sql.Timestamp;
 
 @Entity
 @Table
-@SqlTrigger(foreignVOClass=L3NetworkDnsVO.class, foreignVOJoinColumn="l3NetworkUuid")
 public class L3NetworkDnsVO {
     @Id
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column
     private long id;
-    
+
     @Column
     @ForeignKey(parentEntityClass = L3NetworkEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String l3NetworkUuid;
-    
+
     @Column
     private String dns;
 
-	@Column
-	private Timestamp createDate;
-	
-	@Column
-	private Timestamp lastOpDate;
-	
-	public long getId() {
-		return id;
-	}
+    @Column
+    private Timestamp createDate;
 
-	public void setId(long id) {
-		this.id = id;
-	}
+    @Column
+    private Timestamp lastOpDate;
 
-	public String getL3NetworkUuid() {
-		return l3NetworkUuid;
-	}
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
-	public void setL3NetworkUuid(String l3NetworkUuid) {
-		this.l3NetworkUuid = l3NetworkUuid;
-	}
+    public long getId() {
+        return id;
+    }
 
-	public String getDns() {
-		return dns;
-	}
+    public void setId(long id) {
+        this.id = id;
+    }
 
-	public void setDns(String dns) {
-		this.dns = dns;
-	}
+    public String getL3NetworkUuid() {
+        return l3NetworkUuid;
+    }
+
+    public void setL3NetworkUuid(String l3NetworkUuid) {
+        this.l3NetworkUuid = l3NetworkUuid;
+    }
+
+    public String getDns() {
+        return dns;
+    }
+
+    public void setDns(String dns) {
+        this.dns = dns;
+    }
 
     public Timestamp getCreateDate() {
         return createDate;

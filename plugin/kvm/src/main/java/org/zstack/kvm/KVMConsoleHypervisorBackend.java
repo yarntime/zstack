@@ -7,6 +7,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.console.ConsoleHypervisorBackend;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.host.HostConstant;
@@ -18,6 +19,8 @@ import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.kvm.KVMAgentCommands.GetVncPortResponse;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -37,6 +40,8 @@ public class KVMConsoleHypervisorBackend implements ConsoleHypervisorBackend {
     private CloudBus bus;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager timeoutMgr;
 
     @Override
     public HypervisorType getConsoleBackendHypervisorType() {
@@ -51,6 +56,7 @@ public class KVMConsoleHypervisorBackend implements ConsoleHypervisorBackend {
         KVMHostAsyncHttpCallMsg msg = new KVMHostAsyncHttpCallMsg();
         msg.setHostUuid(vm.getHostUuid());
         msg.setCommand(cmd);
+        msg.setCommandTimeout(timeoutMgr.getTimeout(cmd.getClass(), "5m"));
         msg.setPath(KVMConstant.KVM_GET_VNC_PORT_PATH);
         bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, vm.getHostUuid());
         bus.send(msg, new CloudBusCallBack(complete) {
@@ -64,7 +70,7 @@ public class KVMConsoleHypervisorBackend implements ConsoleHypervisorBackend {
                 KVMHostAsyncHttpCallReply kreply = reply.castReply();
                 GetVncPortResponse rsp = kreply.toResponse(GetVncPortResponse.class);
                 if (!rsp.isSuccess()) {
-                    complete.fail(errf.stringToOperationError(rsp.getError()));
+                    complete.fail(operr(rsp.getError()));
                     return;
                 }
 

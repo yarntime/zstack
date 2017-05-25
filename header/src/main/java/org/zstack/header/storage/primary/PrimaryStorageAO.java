@@ -2,52 +2,49 @@ package org.zstack.header.storage.primary;
 
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
+import org.zstack.header.vo.ResourceVO;
 import org.zstack.header.zone.ZoneEO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @MappedSuperclass
-public class PrimaryStorageAO {
-	@Id
-	@Column
-	private String uuid;
-
-	@Column
+public class PrimaryStorageAO extends ResourceVO {
+    @Column
     @ForeignKey(parentEntityClass = ZoneEO.class, onDeleteAction = ReferenceOption.RESTRICT)
-	private String zoneUuid;
+    private String zoneUuid;
 
-	@Column
-	private String name;
+    @Column
+    private String name;
 
-	@Column
-	private String url;
+    @Column
+    private String url;
 
-	@Column
-	private String description;
+    @Column
+    private String description;
 
-	@Column
-	private String type;
+    @Column
+    private String type;
 
-	@Column
-	private String mountPath;
+    @Column
+    private String mountPath;
 
-	@Column
-	@Enumerated(EnumType.STRING)
-	private PrimaryStorageState state;
+    @Column
+    @Enumerated(EnumType.STRING)
+    private PrimaryStorageState state;
 
     @Column
     @Enumerated(EnumType.STRING)
     private PrimaryStorageStatus status;
 
-	@Column
-	private Timestamp createDate;
+    @Column
+    private Timestamp createDate;
 
-	@Column
-	private Timestamp lastOpDate;
+    @Column
+    private Timestamp lastOpDate;
 
-	public PrimaryStorageAO() {
-	}
+    public PrimaryStorageAO() {
+    }
 
     public PrimaryStorageAO(PrimaryStorageAO other) {
         this.uuid = other.uuid;
@@ -63,6 +60,10 @@ public class PrimaryStorageAO {
         this.lastOpDate = other.lastOpDate;
     }
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public PrimaryStorageStatus getStatus() {
         return status;
@@ -72,44 +73,36 @@ public class PrimaryStorageAO {
         this.status = status;
     }
 
-    public String getUuid() {
-    	return uuid;
+    public String getName() {
+        return name;
     }
 
-	public void setUuid(String uuid) {
-    	this.uuid = uuid;
+    public void setName(String name) {
+        this.name = name;
     }
 
-	public String getName() {
-    	return name;
+    public String getDescription() {
+        return description;
     }
 
-	public void setName(String name) {
-    	this.name = name;
+    public void setDescription(String description) {
+        this.description = description;
     }
 
-	public String getDescription() {
-    	return description;
+    public String getType() {
+        return type;
     }
 
-	public void setDescription(String description) {
-    	this.description = description;
+    public void setType(String type) {
+        this.type = type;
     }
 
-	public String getType() {
-    	return type;
+    public PrimaryStorageState getState() {
+        return state;
     }
 
-	public void setType(String type) {
-    	this.type = type;
-    }
-
-	public PrimaryStorageState getState() {
-    	return state;
-    }
-
-	public void setState(PrimaryStorageState state) {
-    	this.state = state;
+    public void setState(PrimaryStorageState state) {
+        this.state = state;
     }
 
     public Timestamp getCreateDate() {
@@ -129,11 +122,11 @@ public class PrimaryStorageAO {
     }
 
     public String getUrl() {
-    	return url;
+        return url;
     }
 
-	public void setUrl(String url) {
-    	this.url = url;
+    public void setUrl(String url) {
+        this.url = url;
     }
 
     public String getMountPath() {
@@ -151,5 +144,4 @@ public class PrimaryStorageAO {
     public void setZoneUuid(String zoneUuid) {
         this.zoneUuid = zoneUuid;
     }
-    
 }

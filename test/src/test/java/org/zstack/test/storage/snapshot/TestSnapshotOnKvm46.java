@@ -7,7 +7,6 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
-import org.zstack.header.image.ImageBackupStorageRefInventory;
 import org.zstack.header.image.ImageConstant.ImageMediaType;
 import org.zstack.header.image.ImageInventory;
 import org.zstack.header.storage.backup.BackupStorageInventory;
@@ -22,13 +21,11 @@ import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
-import org.zstack.utils.function.Function;
+import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.Arrays;
-import java.util.List;
 
 /*
 * 1. take 4 snapshot from vm's root volume
@@ -70,7 +67,7 @@ public class TestSnapshotOnKvm46 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -99,8 +96,8 @@ public class TestSnapshotOnKvm46 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
         BackupStorageInventory sftp = deployer.backupStorages.get("sftp");
         BackupStorageInventory sftp1 = deployer.backupStorages.get("sftp1");
         VmInstanceInventory vm = deployer.vms.get("TestVm");
@@ -118,6 +115,8 @@ public class TestSnapshotOnKvm46 {
         VolumeSnapshotInventory inv3 = api.createSnapshot(volUuid);
         deltaSnapshot(inv3, 3);
 
+        long size = SizeUnit.GIGABYTE.toByte(10);
+        nfsConfig.mergeSnapshotCmdSize.put(inv3.getVolumeUuid(), size);
         api.changeBackupStorageState(sftp.getUuid(), BackupStorageStateEvent.disable);
         ImageInventory img = api.createTemplateFromSnapshot(inv3.getUuid(), Arrays.asList(sftp.getUuid(), sftp1.getUuid()));
         Assert.assertEquals(1, img.getBackupStorageRefs().size());

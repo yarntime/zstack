@@ -17,6 +17,7 @@ import javax.persistence.criteria.*;
 import javax.persistence.metamodel.SingularAttribute;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 @Configurable(preConstruction=true,autowire=Autowire.BY_TYPE,dependencyCheck=true)
@@ -33,7 +34,7 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     private final CriteriaBuilder _builder;
     private Integer limit;
     private Integer start;
-    
+
     @Autowired
     private DatabaseFacade _dbf;
     
@@ -84,6 +85,12 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     }
 
     @Override
+    public SimpleQuery<T> add(SingularAttribute attr, Op op, Collection vals) {
+        _conditions.add(new Condition(attr, op, vals.toArray(new Object[vals.size()])));
+        return this;
+    }
+
+    @Override
     public SimpleQuery<T> add(SingularAttribute attr, Op op, Object... val) {
         _conditions.add(new Condition(attr, op, val));
         return this;
@@ -127,9 +134,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
             } else if (op == Op.NOT_NULL) {
                 preds.add(_builder.isNotNull(p));
             } else if (op == Op.IN) {
-                //preds.add(_builder.in(p.in(vals))); 
-                preds.add(p.in(vals)); 
+                //preds.add(_builder.in(p.in(vals)));
+                assert vals.length !=0 : String.format("Op.IN needs more than on value, but %s given", vals.length);
+                preds.add(p.in(vals));
             } else if (op == Op.NOT_IN) {
+                assert vals.length !=0 : String.format("Op.NOT_IN needs more than on value, but %s given", vals.length);
                 preds.add(_builder.not(p.in(vals)));
             } else if (op == Op.NULL) {
                 preds.add(_builder.isNull(p)); 
@@ -191,6 +200,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public T find() {
+        return _find();
+    }
+
+    @Transactional
+    T _find() {
         assert _selects.size() == 0 : "find() for entity doesn't need any parameter in Query.Select(), you have put some parameter in Query.select(..), either removing these parameters or using findValue() or findTuple()";
         done();
 
@@ -211,9 +225,14 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
         }
     }
 
-    @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
+    @Override
     public <K> List<K> list() {
+        return _list();
+    }
+
+    @Transactional
+    <K> List<K> _list() {
         assert _selects.size() == 0 : "list() for entities doesn't need any parameter in Query.Select(), you have put some parameter in Query.select(..), either removing these parameters or using listValue() or listTuple()";
         done();
         Query q = _dbf.getEntityManager().createQuery(_query);
@@ -234,6 +253,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public <K> K findValue() {
+        return _findValue();
+    }
+
+    @Transactional
+    <K> K _findValue() {
         assert _selects.size() == 1 : String.format("findValue() only need one parameter in Query.Select(), you have put %s parameter in Query.select(..), either correcting the parameter or using find() or findTuple()", _selects.size());
         done();
         K value = null;
@@ -253,6 +277,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public <K> List<K> listValue() {
+        return _listValue();
+    }
+
+    @Transactional
+    <K> List<K> _listValue() {
         assert _selects.size() == 1 : String.format("listValue() only need one parameter in Query.Select(), you have put %s parameter in Query.select(..), either correcting the parameter or using list() or listTuple()", _selects.size());
         done();
         Query q = _dbf.getEntityManager().createQuery(_query);
@@ -269,6 +298,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public Tuple findTuple() {
+        return _findTuple();
+    }
+
+    @Transactional
+    Tuple _findTuple() {
         assert _selects.size() > 1 : String.format("findTuple() needs more than one parameter in Query.Select(), you have put %s parameter in Query.select(..), either correcting the parameter or using find() or findValue()", _selects.size());
         done();
         Tuple ret = null;
@@ -287,6 +321,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public List<Tuple> listTuple() {
+        return _listTuple();
+    }
+
+    @Transactional
+    List<Tuple> _listTuple() {
         assert _selects.size() > 1 : String.format("listTuple() needs more than one parameter in Query.Select(), you have put %s parameter in Query.select(..), either correcting the parameter or using list() or listValue()", _selects.size());
         done();
         Query q = _dbf.getEntityManager().createQuery(_query);
@@ -303,6 +342,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public Long count() {
+        return _count();
+    }
+
+    @Transactional
+    Long _count() {
         assert _selects.size() == 0 : "count() for entity doesn't need any parameter in Query.Select(), you have put some parameter in Query.select(..), either removing these parameters or using findValue() or findTuple()";
         _query = _builder.createQuery(Long.class);
         _root = _query.from(_entityClass);
@@ -331,6 +375,11 @@ public class SimpleQueryImpl<T> implements SimpleQuery<T> {
     @Override
     @Transactional(readOnly=true, propagation=Propagation.REQUIRES_NEW)
     public boolean isExists() {
+        return _isExists();
+    }
+
+    @Transactional
+    boolean _isExists() {
         assert _selects.size() == 0 : "isExists() for entity doesn't need any parameter in Query.Select(), you have put some parameter in Query.select(..), either removing these parameters or using findValue() or findTuple()";
         _query = _builder.createQuery(Long.class);
         _root = _query.from(_entityClass);

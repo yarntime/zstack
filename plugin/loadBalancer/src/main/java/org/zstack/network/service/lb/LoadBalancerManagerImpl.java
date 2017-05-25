@@ -8,21 +8,25 @@ import org.zstack.core.cloudbus.MessageSafe;
 import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.thread.ChainTask;
+import org.zstack.core.thread.SyncTaskChain;
 import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.core.workflow.ShareFlow;
 import org.zstack.header.AbstractService;
 import org.zstack.header.apimediator.ApiMessageInterceptionException;
+import org.zstack.header.core.Completion;
 import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.identity.IdentityErrors;
 import org.zstack.header.identity.Quota;
-import org.zstack.header.identity.Quota.CheckQuotaForApiMessage;
+import org.zstack.header.identity.Quota.QuotaOperator;
 import org.zstack.header.identity.Quota.QuotaPair;
 import org.zstack.header.identity.ReportQuotaExtensionPoint;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Message;
+import org.zstack.header.message.NeedQuotaCheckMessage;
 import org.zstack.header.query.AddExpandedQueryExtensionPoint;
 import org.zstack.header.query.ExpandedQueryAliasStruct;
 import org.zstack.header.query.ExpandedQueryStruct;
@@ -31,10 +35,16 @@ import org.zstack.header.tag.SystemTagInventory;
 import org.zstack.header.tag.SystemTagValidator;
 import org.zstack.header.vm.VmNicInventory;
 import org.zstack.identity.AccountManager;
+import org.zstack.identity.QuotaUtil;
+import org.zstack.network.service.vip.Vip;
 import org.zstack.network.service.vip.VipInventory;
-import org.zstack.network.service.vip.VipManager;
 import org.zstack.network.service.vip.VipVO;
 import org.zstack.tag.TagManager;
+import org.zstack.utils.Utils;
+import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.TypedQuery;
 import java.util.ArrayList;
@@ -49,6 +59,8 @@ import static org.zstack.utils.CollectionDSL.list;
  */
 public class LoadBalancerManagerImpl extends AbstractService implements LoadBalancerManager,
         AddExpandedQueryExtensionPoint, ReportQuotaExtensionPoint {
+    private static final CLogger logger = Utils.getLogger(LoadBalancerManagerImpl.class);
+
     @Autowired
     private CloudBus bus;
     @Autowired
@@ -61,8 +73,6 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
     private PluginRegistry pluginRgty;
     @Autowired
     private TagManager tagMgr;
-    @Autowired
-    private VipManager vipMgr;
 
     private Map<String, LoadBalancerBackend> backends = new HashMap<String, LoadBalancerBackend>();
 
@@ -81,7 +91,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
     private void passThrough(LoadBalancerMessage msg) {
         LoadBalancerVO vo = dbf.findByUuid(msg.getLoadBalancerUuid(), LoadBalancerVO.class);
         if (vo == null) {
-            throw new OperationFailureException(errf.stringToOperationError(String.format("cannot find the load balancer[uuid:%s]", msg.getLoadBalancerUuid())));
+            throw new OperationFailureException(operr("cannot find the load balancer[uuid:%s]", msg.getLoadBalancerUuid()));
         }
 
         LoadBalancerBase base = new LoadBalancerBase(vo);
@@ -112,18 +122,48 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
             @Override
             public void setup() {
                 flow(new Flow() {
-                    String __name__ = "lock-vip";
+                    String __name__ = "acquire-vip";
+
+                    boolean s = false;
 
                     @Override
                     public void run(FlowTrigger trigger, Map data) {
-                        vipMgr.lockVip(vip, LoadBalancerConstants.LB_NETWORK_SERVICE_TYPE_STRING);
-                        trigger.next();
+                        Vip v = new Vip(vip.getUuid());
+                        v.setUseFor(LoadBalancerConstants.LB_NETWORK_SERVICE_TYPE_STRING);
+                        v.acquire(false, new Completion(trigger) {
+                            @Override
+                            public void success() {
+                                s = true;
+                                trigger.next();
+                            }
+
+                            @Override
+                            public void fail(ErrorCode errorCode) {
+                                trigger.fail(errorCode);
+                            }
+                        });
                     }
 
                     @Override
-                    public void rollback(FlowTrigger trigger, Map data) {
-                        vipMgr.unlockVip(vip);
-                        trigger.rollback();
+                    public void rollback(FlowRollback trigger, Map data) {
+                        if (!s) {
+                            trigger.rollback();
+                            return;
+                        }
+
+                        new Vip(vip.getUuid()).release(false, new Completion(trigger) {
+                            @Override
+                            public void success() {
+                                trigger.rollback();
+                            }
+
+                            @Override
+                            public void fail(ErrorCode errorCode) {
+                                //TODO add GC
+                                logger.warn(errorCode.toString());
+                                trigger.rollback();
+                            }
+                        });
                     }
                 });
 
@@ -157,7 +197,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 error(new FlowErrorHandler(msg) {
                     @Override
                     public void handle(ErrorCode errCode, Map data) {
-                        evt.setErrorCode(errCode);
+                        evt.setError(errCode);
                         bus.publish(evt);
                     }
                 });
@@ -190,9 +230,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
         AbstractSystemTagOperationJudger judger = new AbstractSystemTagOperationJudger() {
             @Override
             public void tagPreDeleted(SystemTagInventory tag) {
-                throw new OperationFailureException(errf.stringToOperationError(
-                        String.format("cannot delete the system tag[%s]. The load balancer plugin relies on it, you can only update it", tag.getTag())
-                ));
+                throw new OperationFailureException(operr("cannot delete the system tag[%s]. The load balancer plugin relies on it, you can only update it", tag.getTag()));
             }
         };
         LoadBalancerSystemTags.BALANCER_ALGORITHM.installJudger(judger);
@@ -211,9 +249,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                         LoadBalancerSystemTags.BALANCER_ALGORITHM_TOKEN);
 
                 if (!LoadBalancerConstants.BALANCE_ALGORITHMS.contains(algorithm)) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid balance algorithm[%s], valid algorithms are %s", algorithm, LoadBalancerConstants.BALANCE_ALGORITHMS)
-                    ));
+                    throw new OperationFailureException(argerr("invalid balance algorithm[%s], valid algorithms are %s", algorithm, LoadBalancerConstants.BALANCE_ALGORITHMS));
                 }
             }
         });
@@ -227,9 +263,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid unhealthy threshold[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid unhealthy threshold[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -243,9 +277,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid healthy threshold[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid healthy threshold[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -259,9 +291,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid healthy timeout[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid healthy timeout[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -275,9 +305,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid connection idle timeout[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid connection idle timeout[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -291,9 +319,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid health check interval[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid health check interval[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -307,9 +333,7 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                 try {
                     Long.valueOf(s);
                 } catch (NumberFormatException e) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid max connection[%s], %s is not a number", systemTag, s)
-                    ));
+                    throw new OperationFailureException(argerr("invalid max connection[%s], %s is not a number", systemTag, s));
                 }
             }
         });
@@ -322,17 +346,13 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
 
                 String[] ts = target.split(":");
                 if (ts.length != 2) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid health target[%s], the format is targetCheckProtocol:port, for example, tcp:default", systemTag)
-                    ));
+                    throw new OperationFailureException(argerr("invalid health target[%s], the format is targetCheckProtocol:port, for example, tcp:default", systemTag));
                 }
 
                 String protocol = ts[0];
                 if (!LoadBalancerConstants.HEALTH_CHECK_TARGET_PROTOCOLS.contains(protocol)) {
-                    throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                            String.format("invalid health target[%s], the target checking protocol[%s] is invalid, valid protocols are %s",
-                                    systemTag, protocol, LoadBalancerConstants.HEALTH_CHECK_TARGET_PROTOCOLS)
-                    ));
+                    throw new OperationFailureException(argerr("invalid health target[%s], the target checking protocol[%s] is invalid, valid protocols are %s",
+                            systemTag, protocol, LoadBalancerConstants.HEALTH_CHECK_TARGET_PROTOCOLS));
                 }
 
                 String port = ts[1];
@@ -340,14 +360,10 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
                     try {
                         int p = Integer.valueOf(port);
                         if (p < 1 || p > 65535) {
-                            throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                                    String.format("invalid invalid health target[%s], port[%s] is not in the range of [1, 65535]", systemTag, port)
-                            ));
+                            throw new OperationFailureException(argerr("invalid invalid health target[%s], port[%s] is not in the range of [1, 65535]", systemTag, port));
                         }
                     } catch (NumberFormatException e) {
-                        throw new OperationFailureException(errf.stringToInvalidArgumentError(
-                                String.format("invalid invalid health target[%s], port[%s] is not a number", systemTag, port)
-                        ));
+                        throw new OperationFailureException(argerr("invalid invalid health target[%s], port[%s] is not a number", systemTag, port));
                     }
                 }
             }
@@ -405,30 +421,49 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
 
     @Override
     public List<Quota> reportQuota() {
-        CheckQuotaForApiMessage checker = new CheckQuotaForApiMessage() {
+        QuotaOperator checker = new QuotaOperator() {
             @Override
             public void checkQuota(APIMessage msg, Map<String, QuotaPair> pairs) {
-                if (msg instanceof APICreateLoadBalancerMsg) {
-                    check((APICreateLoadBalancerMsg) msg, pairs);
+                if (!new QuotaUtil().isAdminAccount(msg.getSession().getAccountUuid())) {
+                    if (msg instanceof APICreateLoadBalancerMsg) {
+                        check((APICreateLoadBalancerMsg) msg, pairs);
+                    }
                 }
             }
 
-            @Transactional(readOnly = true)
-            private void check(APICreateLoadBalancerMsg msg, Map<String, QuotaPair> pairs) {
-                long lbNum = pairs.get(LoadBalancerConstants.QUOTA_LOAD_BALANCER_NUM).getValue();
+            @Override
+            public void checkQuota(NeedQuotaCheckMessage msg, Map<String, QuotaPair> pairs) {
 
+            }
+
+            @Override
+            public List<Quota.QuotaUsage> getQuotaUsageByAccount(String accountUuid) {
+                Quota.QuotaUsage usage = new Quota.QuotaUsage();
+                usage.setName(LoadBalancerConstants.QUOTA_LOAD_BALANCER_NUM);
+                usage.setUsed(getUsedLb(accountUuid));
+                return list(usage);
+            }
+
+            @Transactional(readOnly = true)
+            private long getUsedLb(String accountUuid) {
                 String sql = "select count(lb) from LoadBalancerVO lb, AccountResourceRefVO ref where ref.resourceUuid = lb.uuid and " +
                         "ref.accountUuid = :auuid and ref.resourceType = :rtype";
 
                 TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
-                q.setParameter("auuid", msg.getSession().getAccountUuid());
+                q.setParameter("auuid", accountUuid);
                 q.setParameter("rtype", LoadBalancerVO.class.getSimpleName());
                 Long en = q.getSingleResult();
                 en = en == null ? 0 : en;
+                return en;
+            }
+
+            private void check(APICreateLoadBalancerMsg msg, Map<String, QuotaPair> pairs) {
+                long lbNum = pairs.get(LoadBalancerConstants.QUOTA_LOAD_BALANCER_NUM).getValue();
+                long en = getUsedLb(msg.getSession().getAccountUuid());
 
                 if (en + 1 > lbNum) {
                     throw new ApiMessageInterceptionException(errf.instantiateErrorCode(IdentityErrors.QUOTA_EXCEEDING,
-                            String.format("quota exceeding.  The account[uuid: %s] exceeds a quota[name: %s, value: %s]",
+                            String.format("quota exceeding. The account[uuid: %s] exceeds a quota[name: %s, value: %s]",
                                     msg.getSession().getAccountUuid(), LoadBalancerConstants.QUOTA_LOAD_BALANCER_NUM, lbNum)
                     ));
                 }
@@ -436,8 +471,8 @@ public class LoadBalancerManagerImpl extends AbstractService implements LoadBala
         };
 
         Quota quota = new Quota();
-        quota.setMessageNeedValidation(APICreateLoadBalancerMsg.class);
-        quota.setChecker(checker);
+        quota.addMessageNeedValidation(APICreateLoadBalancerMsg.class);
+        quota.setOperator(checker);
 
         QuotaPair p = new QuotaPair();
         p.setName(LoadBalancerConstants.QUOTA_LOAD_BALANCER_NUM);

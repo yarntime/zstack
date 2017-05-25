@@ -8,6 +8,7 @@ import org.zstack.header.vo.SoftDeletionCascade;
 import org.zstack.header.vo.SoftDeletionCascades;
 
 import javax.persistence.*;
+import java.io.Serializable;
 import java.sql.Timestamp;
 
 /**
@@ -18,10 +19,10 @@ import java.sql.Timestamp;
         @SoftDeletionCascade(parent = ImageVO.class, joinColumn = "imageUuid"),
         @SoftDeletionCascade(parent = BackupStorageVO.class, joinColumn = "backupStorageUuid")
 })
-public class ImageBackupStorageRefVO {
+public class ImageBackupStorageRefVO implements Serializable {
     @Id
     @Column
-    @GeneratedValue(strategy=GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private long id;
     @Column
     @ForeignKey(parentEntityClass = ImageEO.class, onDeleteAction = ReferenceOption.CASCADE)
@@ -30,11 +31,22 @@ public class ImageBackupStorageRefVO {
     @ForeignKey(parentEntityClass = BackupStorageEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String backupStorageUuid;
     @Column
+    @Enumerated(EnumType.STRING)
+    private ImageStatus status;
+    @Column
     private String installPath;
     @Column
     private Timestamp createDate;
     @Column
     private Timestamp lastOpDate;
+
+    public ImageStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(ImageStatus status) {
+        this.status = status;
+    }
 
     public long getId() {
         return id;

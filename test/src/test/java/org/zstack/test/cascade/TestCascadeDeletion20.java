@@ -18,7 +18,7 @@ import org.zstack.test.deployer.Deployer;
 /**
  * 1. create a vm with virtual router
  * 2. delete host
- *
+ * <p>
  * confirm vr is migrated
  */
 public class TestCascadeDeletion20 {
@@ -45,7 +45,8 @@ public class TestCascadeDeletion20 {
 
     @Test
     public void test() throws ApiSenderException, InterruptedException {
-        ApplianceVmVO  vr = dbf.listAll(ApplianceVmVO.class).get(0);
+        api.setTimeout(100000);
+        ApplianceVmVO vr = dbf.listAll(ApplianceVmVO.class).get(0);
         String lastHostUuid = vr.getHostUuid();
         api.deleteHost(lastHostUuid);
         vr = dbf.listAll(ApplianceVmVO.class).get(0);

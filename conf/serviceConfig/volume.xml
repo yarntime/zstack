@@ -63,4 +63,20 @@
     <message>
         <name>org.zstack.header.volume.APIUpdateVolumeMsg</name>
     </message>
+
+    <message>
+        <name>org.zstack.header.volume.APIRecoverDataVolumeMsg</name>
+    </message>
+
+    <message>
+        <name>org.zstack.header.volume.APIExpungeDataVolumeMsg</name>
+    </message>
+
+    <message>
+        <name>org.zstack.header.volume.APISyncVolumeSizeMsg</name>
+    </message>
+
+    <message>
+        <name>org.zstack.header.volume.APIGetVolumeCapabilitiesMsg</name>
+    </message>
 </service>

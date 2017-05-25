@@ -1,5 +1,6 @@
 package org.zstack.network.service.virtualrouter;
 
+import org.zstack.appliancevm.ApplianceVmGlobalProperty;
 import org.zstack.header.network.l3.L3NetworkInventory;
 
 import java.util.List;
@@ -11,9 +12,45 @@ public class VirtualRouterStruct {
     private L3NetworkInventory l3Network;
     private VirtualRouterOfferingValidator offeringValidator;
     private VirtualRouterVmSelector virtualRouterVmSelector;
+    private VirtualRouterOfferingSelector virtualRouterOfferingSelector;
     private List<String> inherentSystemTags;
     private List<String> nonInherentSystemTags;
     private boolean notGatewayForGuestL3Network;
+    private String providerType = VirtualRouterConstant.VIRTUAL_ROUTER_PROVIDER_TYPE;
+    private String applianceVmType = VirtualRouterConstant.VIRTUAL_ROUTER_VM_TYPE;
+    private int applianceVmAgentPort = ApplianceVmGlobalProperty.AGENT_PORT;
+
+    public int getApplianceVmAgentPort() {
+        return applianceVmAgentPort;
+    }
+
+    public void setApplianceVmAgentPort(int applianceVmAgentPort) {
+        this.applianceVmAgentPort = applianceVmAgentPort;
+    }
+
+    public VirtualRouterOfferingSelector getVirtualRouterOfferingSelector() {
+        return virtualRouterOfferingSelector;
+    }
+
+    public void setVirtualRouterOfferingSelector(VirtualRouterOfferingSelector virtualRouterOfferingSelector) {
+        this.virtualRouterOfferingSelector = virtualRouterOfferingSelector;
+    }
+
+    public String getApplianceVmType() {
+        return applianceVmType;
+    }
+
+    public void setApplianceVmType(String applianceVmType) {
+        this.applianceVmType = applianceVmType;
+    }
+
+    public String getProviderType() {
+        return providerType;
+    }
+
+    public void setProviderType(String providerType) {
+        this.providerType = providerType;
+    }
 
     public boolean isNotGatewayForGuestL3Network() {
         return notGatewayForGuestL3Network;

@@ -8,8 +8,8 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.cluster.ClusterInventory;
-import org.zstack.header.host.HostStatus;
 import org.zstack.header.host.HostInventory;
+import org.zstack.header.host.HostStatus;
 import org.zstack.header.zone.ZoneInventory;
 import org.zstack.simulator.SimulatorController;
 import org.zstack.test.*;
@@ -27,7 +27,7 @@ public class TestPingTask {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("ClusterManager.xml")
                 .addXml("ZoneManager.xml").addXml("HostManager.xml")
@@ -40,7 +40,7 @@ public class TestPingTask {
         api = new Api();
         api.startServer();
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         ZoneInventory zone = api.createZones(1).get(0);

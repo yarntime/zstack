@@ -11,7 +11,6 @@ import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
-import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.storage.ceph.backup.CephBackupStorageMonVO;
 import org.zstack.storage.ceph.backup.CephBackupStorageMonVO_;
@@ -29,7 +28,7 @@ import static org.zstack.utils.CollectionDSL.list;
 /**
  * 1. use ceph for backup storage and primary storage
  * 2. add other 2 mons to both backup and primary storage
- *
+ * <p>
  * confirm the mons added successfully
  */
 public class TestCeph6 {
@@ -59,9 +58,9 @@ public class TestCeph6 {
         kconfig = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException {
+
+    @Test
+    public void test() throws ApiSenderException {
         PrimaryStorageInventory ps = deployer.primaryStorages.get("ceph-pri");
         BackupStorageInventory bs = deployer.backupStorages.get("ceph-bk");
 

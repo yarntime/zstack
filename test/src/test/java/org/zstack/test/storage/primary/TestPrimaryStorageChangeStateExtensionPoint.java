@@ -12,11 +12,9 @@ import org.zstack.header.storage.primary.PrimaryStorageState;
 import org.zstack.header.storage.primary.PrimaryStorageStateEvent;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.header.zone.ZoneInventory;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.utils.data.SizeUnit;
+
 public class TestPrimaryStorageChangeStateExtensionPoint {
     Api api;
     ComponentLoader loader;
@@ -26,7 +24,7 @@ public class TestPrimaryStorageChangeStateExtensionPoint {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("ZoneManager.xml")
                 .addXml("Simulator.xml").addXml("PrimaryStorageManager.xml")
@@ -48,10 +46,10 @@ public class TestPrimaryStorageChangeStateExtensionPoint {
         sp.setTotalCapacity(SizeUnit.TERABYTE.toByte(10));
         sp.setAvailableCapacity(sp.getTotalCapacity());
         sp.setUrl("nfs://simulator/primary/");
-    	ZoneInventory zone = api.createZones(1).get(0);
+        ZoneInventory zone = api.createZones(1).get(0);
         sp.setZoneUuid(zone.getUuid());
         PrimaryStorageInventory inv = api.createSimulatoPrimaryStorage(1, sp).get(0);
-        
+
         ext.setPreventChange(true);
         try {
             api.changePrimaryStorageState(inv.getUuid(), PrimaryStorageStateEvent.disable);
@@ -59,7 +57,7 @@ public class TestPrimaryStorageChangeStateExtensionPoint {
         }
         PrimaryStorageVO vo = dbf.findByUuid(inv.getUuid(), PrimaryStorageVO.class);
         Assert.assertEquals(PrimaryStorageState.Enabled, vo.getState());
-        
+
         ext.setPreventChange(false);
         ext.setExpectedCurrent(PrimaryStorageState.Enabled);
         ext.setExpectedNext(PrimaryStorageState.Disabled);

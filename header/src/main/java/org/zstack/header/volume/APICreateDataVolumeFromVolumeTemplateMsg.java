@@ -1,15 +1,23 @@
 package org.zstack.header.volume;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.host.HostVO;
 import org.zstack.header.identity.Action;
 import org.zstack.header.image.ImageVO;
 import org.zstack.header.message.APICreateMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
 
 /**
  */
 @Action(category = VolumeConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/volumes/data/from/data-volume-templates/{imageUuid}",
+        responseClass = APICreateDataVolumeFromVolumeTemplateEvent.class,
+        method = HttpMethod.POST,
+        parameterName = "params"
+)
 public class APICreateDataVolumeFromVolumeTemplateMsg extends APICreateMessage {
     @APIParam(resourceType = ImageVO.class, checkAccount = true)
     private String imageUuid;
@@ -61,4 +69,16 @@ public class APICreateDataVolumeFromVolumeTemplateMsg extends APICreateMessage {
     public void setPrimaryStorageUuid(String primaryStorageUuid) {
         this.primaryStorageUuid = primaryStorageUuid;
     }
+ 
+    public static APICreateDataVolumeFromVolumeTemplateMsg __example__() {
+        APICreateDataVolumeFromVolumeTemplateMsg msg = new APICreateDataVolumeFromVolumeTemplateMsg();
+        msg.setDescription("dataVolume-from-volume-template");
+        msg.setName("data-volume-1");
+        msg.setPrimaryStorageUuid(uuid());
+        msg.setHostUuid(uuid());
+        msg.setImageUuid(uuid());
+
+        return msg;
+    }
+
 }

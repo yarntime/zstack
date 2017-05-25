@@ -29,27 +29,27 @@ import java.util.ArrayList;
 /**
  * 1. create a user
  * 2. assign creating/stopping/rebooting/destroying/migrating permission of allow to the user
- *
+ * <p>
  * confirm the user can create/start/stop/reboot/destroy/migrate the vm
- *
+ * <p>
  * 3. assign creating/stopping/rebooting/destroying/migrating permission of deny to the user
- *
+ * <p>
  * confirm the user can not create/start/stop/reboot/destroy/migrate the vm
- *
+ * <p>
  * 4. assign .* permission to the user
- *
+ * <p>
  * confirm the user can create/start/stop/reboot/destroy/migrate the vm
- *
+ * <p>
  * 5. create a group
  * 6. add the user to the group
  * 7. assign creating/stopping/rebooting/destroying/migrating permission of allow to the group
- *
+ * <p>
  * confirm the user can create/start/stop/reboot/destroy/migrate the vm
- *
+ * <p>
  * 8. assign creating/stopping/rebooting/destroying/migrating permission of deny to the group
- *
+ * <p>
  * confirm the user can not create/start/stop/reboot/destroy/migrate the vm
- *
+ * <p>
  * confirm the user can query vms without setting policies
  */
 public class TestPolicyForVm {
@@ -69,7 +69,7 @@ public class TestPolicyForVm {
         bus = loader.getComponent(CloudBus.class);
         dbf = loader.getComponent(DatabaseFacade.class);
     }
-    
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         InstanceOfferingInventory ioinv = deployer.instanceOfferings.get("TestInstanceOffering");
@@ -102,10 +102,11 @@ public class TestPolicyForVm {
         vmCreator.hostUuid = host1.getUuid();
         VmInstanceInventory vm = vmCreator.create();
 
-        api.stopVmInstance(vm.getUuid(), session);
-        api.startVmInstance(vm.getUuid(), session);
-        api.rebootVmInstance(vm.getUuid(), session);
-        api.migrateVmInstance(vm.getUuid(), host2.getUuid(), session);
+        vm = api.stopVmInstance(vm.getUuid(), session);
+        vm = api.startVmInstance(vm.getUuid(), session);
+        vm = api.rebootVmInstance(vm.getUuid(), session);
+        String targetHostUuid = vm.getHostUuid().equals(host1.getUuid()) ? host2.getUuid() : host1.getUuid();
+        api.migrateVmInstance(vm.getUuid(), targetHostUuid, session);
         api.destroyVmInstance(vm.getUuid(), session);
 
         identityCreator.detachPolicyFromUser("user", "allow");
@@ -202,8 +203,9 @@ public class TestPolicyForVm {
         vm = vmCreator.create();
         api.stopVmInstance(vm.getUuid(), session);
         api.startVmInstance(vm.getUuid(), session);
-        api.rebootVmInstance(vm.getUuid(), session);
-        api.migrateVmInstance(vm.getUuid(), host2.getUuid(), session);
+        vm = api.rebootVmInstance(vm.getUuid(), session);
+        targetHostUuid = vm.getHostUuid().equals(host1.getUuid()) ? host2.getUuid() : host1.getUuid();
+        api.migrateVmInstance(vm.getUuid(), targetHostUuid, session);
         api.destroyVmInstance(vm.getUuid(), session);
 
         // User1 and Group
@@ -217,8 +219,9 @@ public class TestPolicyForVm {
         vm = vmCreator.create();
         api.stopVmInstance(vm.getUuid(), session);
         api.startVmInstance(vm.getUuid(), session);
-        api.rebootVmInstance(vm.getUuid(), session);
-        api.migrateVmInstance(vm.getUuid(), host2.getUuid(), session);
+        vm = api.rebootVmInstance(vm.getUuid(), session);
+        targetHostUuid = vm.getHostUuid().equals(host1.getUuid()) ? host2.getUuid() : host1.getUuid();
+        api.migrateVmInstance(vm.getUuid(), targetHostUuid, session);
         api.destroyVmInstance(vm.getUuid(), session);
 
         vm = vmCreator.create();

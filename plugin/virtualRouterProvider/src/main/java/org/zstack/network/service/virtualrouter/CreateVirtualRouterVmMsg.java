@@ -14,6 +14,33 @@ public class CreateVirtualRouterVmMsg extends NeedReplyMessage {
     private List<String> inherentSystemTags;
     private List<String> nonInherentSystemTags;
     private boolean notGatewayForGuestL3Network;
+    private String providerType;
+    private String applianceVmType;
+    private int applianceVmAgentPort;
+
+    public int getApplianceVmAgentPort() {
+        return applianceVmAgentPort;
+    }
+
+    public void setApplianceVmAgentPort(int applianceVmAgentPort) {
+        this.applianceVmAgentPort = applianceVmAgentPort;
+    }
+
+    public String getApplianceVmType() {
+        return applianceVmType;
+    }
+
+    public void setApplianceVmType(String applianceVmType) {
+        this.applianceVmType = applianceVmType;
+    }
+
+    public String getProviderType() {
+        return providerType;
+    }
+
+    public void setProviderType(String providerType) {
+        this.providerType = providerType;
+    }
 
     public boolean isNotGatewayForGuestL3Network() {
         return notGatewayForGuestL3Network;

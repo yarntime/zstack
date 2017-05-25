@@ -15,9 +15,14 @@ import org.zstack.header.message.APIMessage;
 import org.zstack.header.storage.primary.*;
 import org.zstack.header.zone.ZoneVO;
 import org.zstack.header.zone.ZoneVO_;
+import org.zstack.utils.CollectionUtils;
+
+import static org.zstack.core.Platform.argerr;
+import static org.zstack.core.Platform.operr;
 
 import javax.persistence.TypedQuery;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Created with IntelliJ IDEA.
@@ -35,7 +40,7 @@ public class PrimaryStorageApiInterceptor implements ApiMessageInterceptor {
 
     private void setServiceId(APIMessage msg) {
         if (msg instanceof PrimaryStorageMessage) {
-            PrimaryStorageMessage pmsg = (PrimaryStorageMessage)msg;
+            PrimaryStorageMessage pmsg = (PrimaryStorageMessage) msg;
             bus.makeTargetServiceIdByResourceUuid(msg, PrimaryStorageConstant.SERVICE_ID, pmsg.getPrimaryStorageUuid());
         }
     }
@@ -69,9 +74,7 @@ public class PrimaryStorageApiInterceptor implements ApiMessageInterceptor {
         }
 
         if (!pass && !msg.isAll()) {
-            throw new ApiMessageInterceptionException(errf.stringToInvalidArgumentError(
-                    String.format("zoneUuids, clusterUuids, primaryStorageUuids must have at least one be none-empty list, or all is set to true")
-            ));
+            throw new ApiMessageInterceptionException(argerr("zoneUuids, clusterUuids, primaryStorageUuids must have at least one be none-empty list, or all is set to true"));
         }
 
         if (msg.isAll() && (msg.getZoneUuids() == null || msg.getZoneUuids().isEmpty())) {
@@ -93,35 +96,41 @@ public class PrimaryStorageApiInterceptor implements ApiMessageInterceptor {
         q.add(PrimaryStorageClusterRefVO_.clusterUuid, Op.EQ, msg.getClusterUuid());
         q.add(PrimaryStorageClusterRefVO_.primaryStorageUuid, Op.EQ, msg.getPrimaryStorageUuid());
         if (!q.isExists()) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("primary storage[uuid:%s] has not been attached to cluster[uuid:%s] yet", msg.getPrimaryStorageUuid(), msg.getClusterUuid())
-            ));
+            throw new ApiMessageInterceptionException(argerr("primary storage[uuid:%s] has not been attached to cluster[uuid:%s] yet",
+                            msg.getPrimaryStorageUuid(), msg.getClusterUuid()));
         }
     }
 
     @Transactional
     private void validate(APIAttachPrimaryStorageToClusterMsg msg) {
-        String sql = "select count(ref) from PrimaryStorageClusterRefVO ref where ref.clusterUuid = :clusterUuid and ref.primaryStorageUuid = :psUuid";
-        TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
-        q.setParameter("psUuid", msg.getPrimaryStorageUuid());
-        q.setParameter("clusterUuid", msg.getClusterUuid());
-        long count = q.getSingleResult();
-        if (count != 0) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.OPERATION_ERROR,
-                    String.format("primary storage[uuid:%s] has been attached to cluster[uuid:%s]", msg.getPrimaryStorageUuid(),
-                            msg.getClusterUuid())
-            ));
+        {
+            String sql = "select count(ref)" +
+                    " from PrimaryStorageClusterRefVO ref" +
+                    " where ref.clusterUuid = :clusterUuid" +
+                    " and ref.primaryStorageUuid = :psUuid";
+            TypedQuery<Long> q = dbf.getEntityManager().createQuery(sql, Long.class);
+            q.setParameter("psUuid", msg.getPrimaryStorageUuid());
+            q.setParameter("clusterUuid", msg.getClusterUuid());
+            long count = q.getSingleResult();
+            if (count != 0) {
+                throw new ApiMessageInterceptionException(operr("primary storage[uuid:%s] has been attached to cluster[uuid:%s]",
+                                msg.getPrimaryStorageUuid(), msg.getClusterUuid()));
+            }
         }
-
-        sql = "select count(ps) from PrimaryStorageVO ps, ClusterVO cluster where cluster.zoneUuid = ps.zoneUuid and cluster.uuid = :clusterUuid and ps.uuid = :psUuid";
-        TypedQuery<Long> jq = dbf.getEntityManager().createQuery(sql, Long.class);
-        jq.setParameter("psUuid", msg.getPrimaryStorageUuid());
-        jq.setParameter("clusterUuid", msg.getClusterUuid());
-        count = jq.getSingleResult();
-        if (count == 0) {
-            throw new ApiMessageInterceptionException(errf.instantiateErrorCode(SysErrors.INVALID_ARGUMENT_ERROR,
-                    String.format("primary storage[uuid:%s] and cluster[uuid:%s] are not in the same zone", msg.getPrimaryStorageUuid(), msg.getClusterUuid())
-            ));
+        {
+            String sql = "select count(ps)" +
+                    " from PrimaryStorageVO ps, ClusterVO cluster" +
+                    " where cluster.zoneUuid = ps.zoneUuid" +
+                    " and cluster.uuid = :clusterUuid" +
+                    " and ps.uuid = :psUuid";
+            TypedQuery<Long> jq = dbf.getEntityManager().createQuery(sql, Long.class);
+            jq.setParameter("psUuid", msg.getPrimaryStorageUuid());
+            jq.setParameter("clusterUuid", msg.getClusterUuid());
+            long count = jq.getSingleResult();
+            if (count == 0) {
+                throw new ApiMessageInterceptionException(argerr("primary storage[uuid:%s] and cluster[uuid:%s] are not in the same zone",
+                                msg.getPrimaryStorageUuid(), msg.getClusterUuid()));
+            }
         }
     }
 
@@ -130,6 +139,18 @@ public class PrimaryStorageApiInterceptor implements ApiMessageInterceptor {
             APIDeletePrimaryStorageEvent evt = new APIDeletePrimaryStorageEvent(msg.getId());
             bus.publish(evt);
             throw new StopRoutingException();
+        }
+
+        SimpleQuery<PrimaryStorageClusterRefVO> sq = dbf.createQuery(PrimaryStorageClusterRefVO.class);
+        sq.add(PrimaryStorageClusterRefVO_.primaryStorageUuid, Op.EQ, msg.getPrimaryStorageUuid());
+        List<PrimaryStorageClusterRefVO> pscRefs = sq.list();
+        if (!pscRefs.isEmpty()) {
+            String clusterUuidsString = pscRefs.stream()
+                    .map(PrimaryStorageClusterRefVO::getClusterUuid)
+                    .collect(Collectors.joining(", "));
+            throw new ApiMessageInterceptionException(operr("primary storage[uuid:%s] cannot be deleted for still " +
+                            "being attached to cluster[uuid:%s].",
+                    msg.getPrimaryStorageUuid(), clusterUuidsString));
         }
     }
 }

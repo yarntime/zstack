@@ -2,7 +2,6 @@ package org.zstack.header.query;
 
 import org.zstack.header.message.APIParam;
 import org.zstack.header.message.APISyncCallMessage;
-import org.zstack.header.rest.APINoSee;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,11 +12,20 @@ public abstract class APIQueryMessage extends APISyncCallMessage {
     private Integer limit = 1000;
     private Integer start;
     private boolean count;
+    private String groupBy;
     private boolean replyWithCount;
     private String sortBy;
     @APIParam(required = false, validValues = {"asc", "desc"})
     private String sortDirection = "asc";
     private List<String> fields;
+
+    public String getGroupBy() {
+        return groupBy;
+    }
+
+    public void setGroupBy(String groupBy) {
+        this.groupBy = groupBy;
+    }
 
     public List<QueryCondition> getConditions() {
         if (conditions == null) {
@@ -77,18 +85,22 @@ public abstract class APIQueryMessage extends APISyncCallMessage {
     public void setStart(Integer start) {
         this.start = start;
     }
-    
-    // internal use for test
-    public void addQueryCondition(String name, QueryOp op, String...vals) {
+
+    public void addQueryCondition(String name, String op, String... vals) {
         QueryCondition qc = new QueryCondition();
         qc.setName(name);
-        qc.setOp(op.toString());
+        qc.setOp(op);
         if (vals.length == 1) {
             qc.setValue(vals[0]);
         } else {
             qc.setValues(vals);
         }
         getConditions().add(qc);
+    }
+
+    // internal use for test
+    public void addQueryCondition(String name, QueryOp op, String... vals) {
+        addQueryCondition(name, op.toString(), vals);
     }
 
     public void addField(String name) {

@@ -4,23 +4,18 @@ import junit.framework.Assert;
 import org.apache.commons.io.FileUtils;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.transaction.annotation.Transactional;
 import org.zstack.core.Platform;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.managementnode.ManagementNodeInventory;
-import org.zstack.portal.managementnode.ManagementNode;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.BeanConstructor;
-import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
-import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.path.PathUtil;
 
-import javax.persistence.Query;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
@@ -29,7 +24,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- *
  * create node0 with some non-restartable jobs
  * create node1 with some restartable jobs
  * all jobs are in the same queue
@@ -98,7 +92,7 @@ public class TestMultipleNode10 {
             }
             FileUtils.forceMkdir(passFolder);
 
-            for (String uuid: retUuids) {
+            for (String uuid : retUuids) {
                 File f = new File(PathUtil.join(passFolder.getAbsolutePath(), uuid));
                 f.createNewFile();
                 logger.debug(String.format("create pass file %s", f.getAbsolutePath()));

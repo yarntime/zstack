@@ -7,70 +7,58 @@ import org.zstack.header.search.TriggerIndex;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 import java.sql.Timestamp;
 
 @Entity
 @Table
-@TriggerIndex
-@SqlTrigger(foreignVOClass=VmInstanceVO.class, foreignVOJoinColumn="vmInstanceUuid")
-public class VmNicVO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class VmNicVO extends ResourceVO {
     @Column
     @ForeignKey(parentEntityClass = VmInstanceEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String vmInstanceUuid;
-    
+
     @Column
     @ForeignKey(parentEntityClass = UsedIpVO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String usedIpUuid;
-    
+
     @Column
     @ForeignKey(parentEntityClass = L3NetworkEO.class, onDeleteAction = ReferenceOption.SET_NULL)
     private String l3NetworkUuid;
-    
+
     @Column
     @Index
     private String ip;
-    
+
     @Column
     private String netmask;
-    
+
     @Column
     private String gateway;
-   
+
     @Column
     @Index
     private String mac;
-    
+
     @Column
     private String metaData;
-    
+
     @Column
     private int deviceId;
-    
+
     @Column
     private String internalName;
-    
+
     @Column
     private Timestamp createDate;
-    
+
     @Column
     private Timestamp lastOpDate;
-    
 
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
     }
 
     public String getVmInstanceUuid() {
@@ -138,29 +126,29 @@ public class VmNicVO {
     }
 
     public String getMetaData() {
-		return metaData;
-	}
+        return metaData;
+    }
 
-	public void setMetaData(String metaData) {
-		this.metaData = metaData;
-	}
+    public void setMetaData(String metaData) {
+        this.metaData = metaData;
+    }
 
-	public String getNetmask() {
-		return netmask;
-	}
+    public String getNetmask() {
+        return netmask;
+    }
 
-	public void setNetmask(String netmask) {
-		this.netmask = netmask;
-	}
+    public void setNetmask(String netmask) {
+        this.netmask = netmask;
+    }
 
-	public String getGateway() {
-		return gateway;
-	}
+    public String getGateway() {
+        return gateway;
+    }
 
-	public void setGateway(String gateway) {
-		this.gateway = gateway;
-	}
-	
+    public void setGateway(String gateway) {
+        this.gateway = gateway;
+    }
+
     public String getInternalName() {
         return internalName;
     }

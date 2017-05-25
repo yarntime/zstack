@@ -8,6 +8,7 @@ import org.zstack.core.db.GLock;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.AbstractService;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.message.Message;
 import org.zstack.utils.BeanUtils;
@@ -26,8 +27,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static org.zstack.core.Platform.argerr;
 
 public class GlobalConfigFacadeImpl extends AbstractService implements GlobalConfigFacade {
     private static final CLogger logger = Utils.getLogger(GlobalConfigFacadeImpl.class);
@@ -40,7 +44,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
     private ErrorFacade errf;
 
     private JAXBContext context;
-    private Map<String, GlobalConfig> allConfigs = new HashMap<String, GlobalConfig>();
+    private Map<String, GlobalConfig> allConfigs = new ConcurrentHashMap<>();
 
     private static final String CONFIG_FOLDER = "globalConfig";
     private static final String OTHER_CATEGORY = "Others";
@@ -64,8 +68,8 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
         GlobalConfig c = allConfigs.get(msg.getIdentity());
         APIGetGlobalConfigReply reply = new APIGetGlobalConfigReply();
         if (c == null) {
-            String err = String.format("unable to find GlobalConfig[category:%s, name:%s]", msg.getCategory(), msg.getName());
-            reply.setError(errf.stringToInvalidArgumentError(err));
+            ErrorCode err = argerr("unable to find GlobalConfig[category:%s, name:%s]", msg.getCategory(), msg.getName());
+            reply.setError(err);
         } else {
             GlobalConfigInventory inv = GlobalConfigInventory.valueOf(c);
             reply.setInventory(inv);
@@ -92,20 +96,21 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
 
     private void handle(APIUpdateGlobalConfigMsg msg) {
         APIUpdateGlobalConfigEvent evt = new APIUpdateGlobalConfigEvent(msg.getId());
-        GlobalConfig c = allConfigs.get(msg.getIdentity());
-        if (c == null) {
-            String err = String.format("Unable to find GlobalConfig[category: %s, value: %s]", msg.getCategory(), msg.getName());
-            evt.setErrorCode(errf.stringToInvalidArgumentError(err));
+        GlobalConfig globalConfig = allConfigs.get(msg.getIdentity());
+        if (globalConfig == null) {
+            ErrorCode err = argerr("Unable to find GlobalConfig[category: %s, name: %s]", msg.getCategory(), msg.getName());
+            evt.setError(err);
             bus.publish(evt);
             return;
         }
 
         try {
-            c.updateValue(msg.getValue());
-            GlobalConfigInventory inv = GlobalConfigInventory.valueOf(c);
+            globalConfig.updateValue(msg.getValue());
+
+            GlobalConfigInventory inv = GlobalConfigInventory.valueOf(globalConfig.reload());
             evt.setInventory(inv);
         } catch (GlobalConfigException e) {
-            evt.setErrorCode(errf.stringToInvalidArgumentError(e.getMessage()));
+            evt.setError(argerr(e.getMessage()));
             logger.warn(e.getMessage(), e);
         }
         
@@ -122,12 +127,15 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
         class GlobalConfigInitializer {
             Map<String, GlobalConfig> configsFromXml = new HashMap<String, GlobalConfig>();
             Map<String, GlobalConfig> configsFromDatabase = new HashMap<String, GlobalConfig>();
+            List<Field> globalConfigFields = new ArrayList<Field>();
 
             void init() {
                 GLock lock = new GLock(LOCK, 320);
                 lock.lock();
                 try {
+                    parseGlobalConfigFields();
                     loadConfigFromXml();
+                    loadConfigFromJava();
                     loadConfigFromDatabase();
                     createValidatorForBothXmlAndDatabase();
                     validateConfigFromXml();
@@ -139,10 +147,75 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                     allConfigs.putAll(configsFromXml);
                     // re-validate after merging xml's with db's
                     validateAll();
+                } catch (IllegalArgumentException ie) {
+                    throw ie;
                 } catch (Exception e) {
                     throw new CloudRuntimeException(e);
                 } finally {
                     lock.unlock();
+                }
+            }
+
+            private void parseGlobalConfigFields() {
+                List<Class> definitionClasses = BeanUtils.scanClass("org.zstack", GlobalConfigDefinition.class);
+                for (Class def : definitionClasses) {
+                    for (Field field : def.getDeclaredFields()) {
+                        if (Modifier.isStatic(field.getModifiers()) && GlobalConfig.class.isAssignableFrom(field.getType())) {
+                            field.setAccessible(true);
+
+                            try {
+                                GlobalConfig config = (GlobalConfig) field.get(null);
+                                if (config == null) {
+                                    throw new CloudRuntimeException(String.format("GlobalConfigDefinition[%s] defines a null GlobalConfig[%s]." +
+                                                    "You must assign a value to it using new GlobalConfig(category, name)",
+                                            def.getClass().getName(), field.getName()));
+                                }
+
+                                globalConfigFields.add(field);
+                            } catch (IllegalAccessException e) {
+                                throw new CloudRuntimeException(e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            private void loadConfigFromJava() {
+                for (Field field : globalConfigFields) {
+                    try {
+                        GlobalConfig config = (GlobalConfig) field.get(null);
+                        if (config == null) {
+                            throw new CloudRuntimeException(String.format("GlobalConfigDefinition[%s] defines a null GlobalConfig[%s]." +
+                                            "You must assign a value to it using new GlobalConfig(category, name)",
+                                    field.getDeclaringClass().getClass().getName(), field.getName()));
+                        }
+
+                        GlobalConfigDef d = field.getAnnotation(GlobalConfigDef.class);
+                        if (d == null) {
+                            continue;
+                        }
+
+                        GlobalConfig c = new GlobalConfig();
+                        c.setCategory(config.getCategory());
+                        c.setName(config.getName());
+                        c.setDescription(d.description());
+                        c.setDefaultValue(d.defaultValue());
+                        c.setValue(d.defaultValue());
+                        c.setType(d.type().getName());
+                        if (!"".equals(d.validatorRegularExpression())) {
+                            c.setValidatorRegularExpression(d.validatorRegularExpression());
+                        }
+
+                        if (configsFromXml.containsKey(c.getIdentity())) {
+                            throw new CloudRuntimeException(String.format("duplicate global configuration. %s defines a" +
+                                    " global config[category: %s, name: %s] that has been defined by a XML configure or" +
+                                    " another java class", field.getDeclaringClass().getName(), c.getCategory(), c.getName()));
+                        }
+
+                        configsFromXml.put(c.getIdentity(), c);
+                    } catch (IllegalAccessException e) {
+                        throw new CloudRuntimeException(e);
+                    }
                 }
             }
 
@@ -154,7 +227,13 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
 
             private void mergeXmlDatabase() {
                 for (GlobalConfig g : configsFromDatabase.values()) {
-                    configsFromXml.put(g.getIdentity(), g);
+                    GlobalConfig x = configsFromXml.get(g.getIdentity());
+                    if (x == null) {
+                        configsFromXml.put(g.getIdentity(), g);
+                    } else {
+                        x.setValue(g.value());
+                        x.setDefaultValue(g.getDefaultValue());
+                    }
                 }
             }
 
@@ -163,9 +242,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                     try {
                         g.validate();
                     } catch (Exception e) {
-                        throw new IllegalArgumentException(String.format(
-                                String.format("exception happened when validating global config:\n%s", g.toString())
-                        ), e);
+                        throw new IllegalArgumentException(String.format("exception happened when validating global config:\n%s", g.toString()), e);
                     }
                 }
             }
@@ -226,14 +303,14 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                     {
                         if (g.getType() != null) {
                             typeClass = Class.forName(g.getType());
-                        }
 
-                        try {
-                            typeClassValueOfMethod = typeClass.getMethod("valueOf", String.class);
-                        } catch (Exception e) {
-                            String err = String.format("GlobalConfig[category:%s, name:%s] specifies type[%s] which doesn't have a static valueOf() method, ignore this type",
-                                    g.getCategory(), g.getName(), g.getType());
-                            logger.warn(err);
+                            try {
+                                typeClassValueOfMethod = typeClass.getMethod("valueOf", String.class);
+                            } catch (Exception e) {
+                                String err = String.format("GlobalConfig[category:%s, name:%s] specifies type[%s] which doesn't have a static valueOf() method, ignore this type",
+                                        g.getCategory(), g.getName(), g.getType());
+                                logger.warn(err);
+                            }
                         }
 
                         regularExpression = g.getValidatorRegularExpression();
@@ -244,11 +321,39 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                         if (typeClassValueOfMethod != null) {
                             try {
                                 typeClassValueOfMethod.invoke(typeClass, newValue);
+                            } catch (Exception e) {
+                                String err = String.format("GlobalConfig[category:%s, name:%s] is of type %s, the value[%s] cannot be converted to that type, %s",
+                                        g.getCategory(), g.getName(), typeClass.getName(), newValue, e.getMessage());
+                                throw new GlobalConfigException(err, e);
+                            }
+
+                            try {
                                 typeClassValueOfMethod.invoke(typeClass, g.getDefaultValue());
                             } catch (Exception e) {
-                                String err = String.format("GlobalConfig[category:%s, name:%s] specifies type[%s], but its value[%s] or defaultValuep[%s] cannot be converted to that type, %s",
-                                        g.getCategory(), g.getName(), typeClass.getName(), g.value(), g.getDefaultValue(), e.getMessage());
+                                String err = String.format("GlobalConfig[category:%s, name:%s] is of type %s, the default value[%s] cannot be converted to that type, %s",
+                                        g.getCategory(), g.getName(), typeClass.getName(), g.getDefaultValue(), e.getMessage());
                                 throw new GlobalConfigException(err, e);
+                            }
+                        }
+
+                        if (typeClass != null && (Boolean.class).isAssignableFrom(typeClass)) {
+                            if (newValue == null ||
+                                    (!newValue.equalsIgnoreCase("true") &&
+                                            !newValue.equalsIgnoreCase("false"))
+                                    ) {
+                                String err = String.format("GlobalConfig[category:%s, name:%s]'s value[%s] is not a valid boolean string[true, false].",
+                                        g.getCategory(), g.getName(), newValue);
+                                throw new GlobalConfigException(err);
+                            }
+
+                            if (g.getDefaultValue() == null ||
+                                    (!g.getDefaultValue().equalsIgnoreCase("true") &&
+                                            !g.getDefaultValue().equalsIgnoreCase("false"))
+                                    ) {
+                                String err = String.format("GlobalConfig[category:%s, name:%s]'s default value[%s] is not a valid boolean string[true, false].",
+                                        g.getCategory(), g.getName(), g.getDefaultValue());
+                                throw new GlobalConfigException(err);
+
                             }
                         }
 
@@ -258,7 +363,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                                 Matcher mt = p.matcher(newValue);
                                 if (!mt.matches()) {
                                     String err = String.format("GlobalConfig[category:%s, name:%s]'s value[%s] doesn't match validatorRegularExpression[%s]",
-                                            g.getCategory(), g.getName(), g.value(), regularExpression);
+                                            g.getCategory(), g.getName(), newValue, regularExpression);
                                     throw new GlobalConfigException(err);
                                 }
                             }
@@ -311,30 +416,25 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
             }
 
             private void link() {
-                List<Class> definitionClasses = BeanUtils.scanClass("org.zstack", GlobalConfigDefinition.class);
-                for (Class def : definitionClasses) {
-                    for (Field field : def.getDeclaredFields()) {
-                        if (Modifier.isStatic(field.getModifiers()) && GlobalConfig.class.isAssignableFrom(field.getType())) {
-                            field.setAccessible(true);
-                            try {
-                                GlobalConfig config = (GlobalConfig) field.get(null);
-                                if (config == null) {
-                                    throw new CloudRuntimeException(String.format("GlobalConfigDefinition[%s] defines a null GlobalConfig[%s]." +
-                                                    "You must assign a value to it using new GlobalConfig(category, name)",
-                                            def.getClass().getName(), field.getName()));
-                                }
-
-                                link(field, config);
-                            } catch (IllegalAccessException e) {
-                                throw new CloudRuntimeException(e);
-                            }
+                for (Field field : globalConfigFields) {
+                    field.setAccessible(true);
+                    try {
+                        GlobalConfig config = (GlobalConfig) field.get(null);
+                        if (config == null) {
+                            throw new CloudRuntimeException(String.format("GlobalConfigDefinition[%s] defines a null GlobalConfig[%s]." +
+                                    "You must assign a value to it using new GlobalConfig(category, name)",
+                                    field.getDeclaringClass().getName(), field.getName()));
                         }
+
+                        link(field, config);
+                    } catch (IllegalAccessException e) {
+                        throw new CloudRuntimeException(e);
                     }
                 }
 
                 for (GlobalConfig c : configsFromXml.values()) {
                     if (!c.isLinked()) {
-                        logger.warn(String.format("GlobalConfig[catetory: %s, name: %s] is not linked to any definition", c.getCategory(), c.getName()));
+                        logger.warn(String.format("GlobalConfig[category: %s, name: %s] is not linked to any definition", c.getCategory(), c.getName()));
                     }
                 }
             }
@@ -388,7 +488,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                                                 config.getCanonicalName(), at.numberLessThan(), num));
                                     }
                                 } catch (NumberFormatException e) {
-                                    throw new GlobalConfigException(String.format("%s is not a number", value), e);
+                                    throw new GlobalConfigException(String.format("%s is not a number or out of range of a Long type", value), e);
                                 }
                             }
                         });
@@ -405,7 +505,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                                                 config.getCanonicalName(), at.numberGreaterThan(), num));
                                     }
                                 } catch (NumberFormatException e) {
-                                    throw new GlobalConfigException(String.format("%s is not a number", value), e);
+                                    throw new GlobalConfigException(String.format("%s is not a number or out of range of a Long type", value), e);
                                 }
                             }
                         });
@@ -427,7 +527,7 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                                                 config.getCanonicalName(), lowBound, upBound));
                                     }
                                 } catch (NumberFormatException e) {
-                                    throw new GlobalConfigException(String.format("%s is not a number", value), e);
+                                    throw new GlobalConfigException(String.format("%s is not a number or out of range of a Long type", value), e);
                                 }
                             }
                         });
@@ -447,9 +547,10 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
                     }
                 }
 
+                config.setConfigDef(field.getAnnotation(GlobalConfigDef.class));
                 config.setLinked(true);
-                logger.debug(String.format("linked GlobalConfig[category:%s, name:%s] to %s.%s",
-                        config.getCategory(), config.getName(), field.getDeclaringClass().getName(), field.getName()));
+                logger.debug(String.format("linked GlobalConfig[category:%s, name:%s, value:%s] to %s.%s",
+                        config.getCategory(), config.getName(), config.getDefaultValue(), field.getDeclaringClass().getName(), field.getName()));
             }
         }
 
@@ -480,6 +581,14 @@ public class GlobalConfigFacadeImpl extends AbstractService implements GlobalCon
         GlobalConfig c = allConfigs.get(GlobalConfig.produceIdentity(category, name));
         DebugUtils.Assert(c!=null, String.format("cannot find GlobalConfig[category:%s, name:%s]", category, name));
         return c.value(clz);
+    }
+
+    @Override
+    public GlobalConfig createGlobalConfig(GlobalConfigVO vo) {
+        vo = dbf.persistAndRefresh(vo);
+        GlobalConfig c = GlobalConfig.valueOf(vo);
+        allConfigs.put(GlobalConfig.produceIdentity(vo.getCategory(), vo.getName()), c);
+        return c;
     }
 
     @Override

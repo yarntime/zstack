@@ -7,23 +7,21 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.config.GlobalConfigFacade;
 import org.zstack.core.db.DatabaseFacade;
-import org.zstack.core.db.SimpleQuery;
-import org.zstack.header.configuration.InstanceOfferingInventory;
+import org.zstack.header.cluster.ClusterInventory;
 import org.zstack.header.identity.SessionInventory;
-import org.zstack.header.image.ImageInventory;
-import org.zstack.header.network.l3.L3NetworkInventory;
-import org.zstack.header.storage.primary.ImageCacheVO;
-import org.zstack.header.storage.primary.ImageCacheVO_;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
-import org.zstack.test.*;
+import org.zstack.test.Api;
+import org.zstack.test.ApiSenderException;
+import org.zstack.test.DBUtil;
+import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
 
 
 /**
  * 1. delete a nfs primary storage
- *
+ * <p>
  * confirm it's umounted on the kvm hosts
  */
 public class TestDeleteNfsPrimaryStorage {
@@ -61,8 +59,10 @@ public class TestDeleteNfsPrimaryStorage {
 
     @Test
     public void test() throws ApiSenderException {
-        PrimaryStorageInventory nfs = deployer.primaryStorages.get("nfs");
-        api.deletePrimaryStorage(nfs.getUuid());
+        PrimaryStorageInventory nfsps = deployer.primaryStorages.get("nfs");
+        ClusterInventory ci = deployer.clusters.get("Cluster1");
+        api.detachPrimaryStorage(nfsps.getUuid(), ci.getUuid());
+        api.deletePrimaryStorage(nfsps.getUuid());
 
         Assert.assertFalse(config.unmountCmds.isEmpty());
     }

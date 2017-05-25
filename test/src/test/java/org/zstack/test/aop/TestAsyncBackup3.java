@@ -12,7 +12,6 @@ import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
-import org.zstack.header.message.NeedReplyMessage;
 import org.zstack.test.BeanConstructor;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
@@ -55,7 +54,7 @@ public class TestAsyncBackup3 {
 
     @Test
     public void test() throws InterruptedException {
-        testMethod(new Completion() {
+        testMethod(new Completion(null) {
             @Override
             public void success() {
             }
@@ -82,7 +81,7 @@ public class TestAsyncBackup3 {
 
     @Test
     public void test1() throws InterruptedException {
-        testMethod2(new ReturnValueCompletion() {
+        testMethod2(new ReturnValueCompletion(null) {
             @Override
             public void success(Object returnValue) {
             }

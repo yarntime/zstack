@@ -23,7 +23,7 @@ public class TestRestAsyncCallbackFail {
     String url;
     CountDownLatch latch = new CountDownLatch(1);
     boolean success = false;
-    
+
     @Before
     public void setUp() throws Exception {
         wbean = new WebBeanConstructor();
@@ -37,7 +37,7 @@ public class TestRestAsyncCallbackFail {
     public void test() throws InterruptedException {
         String url = wbean.buildUrl(RESTBeanForTest.ROOT, RESTBeanForTest.CALLBACK_FAIL_PATH);
         final String hi = "hello";
-        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<String>() {
+        restf.asyncJsonPost(url, hi, new JsonAsyncRESTCallback<String>(null) {
 
             @Override
             public void fail(ErrorCode err) {
@@ -57,15 +57,15 @@ public class TestRestAsyncCallbackFail {
             public Class<String> getReturnClass() {
                 return String.class;
             }
-            
+
         }, TimeUnit.SECONDS, 10);
         latch.await(1, TimeUnit.MINUTES);
         Assert.assertTrue(success);
     }
-    
+
     @After
     public void tearDown() {
-        wbean.stopTomcat();
+        wbean.stopJetty();
     }
 
 }

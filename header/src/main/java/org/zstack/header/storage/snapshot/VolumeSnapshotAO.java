@@ -4,6 +4,8 @@ import org.zstack.header.storage.primary.PrimaryStorageEO;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.ForeignKey.ReferenceOption;
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
+import org.zstack.header.vo.ShadowEntity;
 import org.zstack.header.volume.VolumeEO;
 
 import javax.persistence.*;
@@ -12,11 +14,7 @@ import java.sql.Timestamp;
 /**
  */
 @MappedSuperclass
-public class VolumeSnapshotAO {
-    @Id
-    @Column
-    private String uuid;
-
+public class VolumeSnapshotAO extends ResourceVO implements ShadowEntity {
     @Column
     @Index
     private String name;
@@ -78,12 +76,16 @@ public class VolumeSnapshotAO {
     @Column
     private Timestamp lastOpDate;
 
-    public String getUuid() {
-        return uuid;
+    @Transient
+    private VolumeSnapshotAO shadow;
+
+    public VolumeSnapshotAO getShadow() {
+        return shadow;
     }
 
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
     }
 
     public String getName() {
@@ -228,5 +230,10 @@ public class VolumeSnapshotAO {
 
     public void setTreeUuid(String treeUuid) {
         this.treeUuid = treeUuid;
+    }
+
+    @Override
+    public void setShadow(Object o) {
+        shadow = (VolumeSnapshotAO) o;
     }
 }

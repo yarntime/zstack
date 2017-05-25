@@ -8,6 +8,7 @@ import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.errorcode.ErrorFacade;
 import org.zstack.header.core.workflow.Flow;
+import org.zstack.header.core.workflow.FlowRollback;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.host.HostInventory;
 import org.zstack.header.host.HostVO;
@@ -16,6 +17,8 @@ import org.zstack.header.storage.primary.*;
 import org.zstack.header.vm.VmInstanceConstant;
 import org.zstack.header.vm.VmInstanceSpec;
 import org.zstack.header.volume.VolumeInventory;
+import org.zstack.utils.DebugUtils;
+import org.zstack.utils.gson.JSONObjectUtil;
 
 import java.util.Map;
 
@@ -33,14 +36,17 @@ public class VmAllocatePrimaryStorageForAttachingDiskFlow implements Flow {
         final VolumeInventory volume = (VolumeInventory) data.get(VmInstanceConstant.Params.AttachingVolumeInventory.toString());
         final VmInstanceSpec spec = (VmInstanceSpec) data.get(VmInstanceConstant.Params.VmInstanceSpec.toString());
         String hostUuid = spec.getVmInventory().getHostUuid() == null ? spec.getVmInventory().getLastHostUuid() : spec.getVmInventory().getHostUuid();
-        assert hostUuid != null;
+        DebugUtils.Assert(hostUuid != null, String.format(
+                "hostUuid from VmInventory should not be null, the vmInventory is [%s]",
+                JSONObjectUtil.toJsonString(spec.getVmInventory())));
         HostVO hvo = dbf.findByUuid(hostUuid, HostVO.class);
         HostInventory hinv = HostInventory.valueOf(hvo);
         spec.setDestHost(hinv);
 
         AllocatePrimaryStorageMsg msg = new AllocatePrimaryStorageMsg();
         msg.setSize(volume.getSize());
-        msg.setHostUuid(hinv.getUuid());
+        msg.setPurpose(PrimaryStorageAllocationPurpose.CreateVolume.toString());
+        msg.setRequiredHostUuid(hinv.getUuid());
         msg.setDiskOfferingUuid(volume.getDiskOfferingUuid());
         msg.setServiceId(bus.makeLocalServiceId(PrimaryStorageConstant.SERVICE_ID));
         bus.send(msg, new CloudBusCallBack(chain) {
@@ -59,15 +65,15 @@ public class VmAllocatePrimaryStorageForAttachingDiskFlow implements Flow {
     }
 
     @Override
-    public void rollback(FlowTrigger chain, Map data) {
+    public void rollback(FlowRollback chain, Map data) {
         Long size = (Long) data.get(VmAllocatePrimaryStorageForAttachingDiskFlow.class);
         if (size != null) {
             PrimaryStorageInventory pri = (PrimaryStorageInventory) data.get(VmInstanceConstant.Params.DestPrimaryStorageInventoryForAttachingVolume.toString());
-            ReturnPrimaryStorageCapacityMsg rmsg = new ReturnPrimaryStorageCapacityMsg();
-            rmsg.setPrimaryStorageUuid(pri.getUuid());
-            rmsg.setDiskSize(size);
-            bus.makeTargetServiceIdByResourceUuid(rmsg, PrimaryStorageConstant.SERVICE_ID, pri.getUuid());
-            bus.send(rmsg);
+            IncreasePrimaryStorageCapacityMsg imsg = new IncreasePrimaryStorageCapacityMsg();
+            imsg.setPrimaryStorageUuid(pri.getUuid());
+            imsg.setDiskSize(size);
+            bus.makeTargetServiceIdByResourceUuid(imsg, PrimaryStorageConstant.SERVICE_ID, pri.getUuid());
+            bus.send(imsg);
         }
         chain.rollback();
     }

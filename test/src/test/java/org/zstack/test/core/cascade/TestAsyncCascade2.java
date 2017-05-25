@@ -8,6 +8,7 @@ import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.header.core.Completion;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.test.BeanConstructor;
+import org.zstack.test.WebBeanConstructor;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
@@ -19,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 
 /**
- *
  * test stop cascading by return null from createActionForChildResource
  */
 public class TestAsyncCascade2 {
@@ -34,8 +34,9 @@ public class TestAsyncCascade2 {
 
     @Before
     public void setUp() throws Exception {
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         loader = con.build();
+        con.addXml("PortalForUnitTest.xml");
         casf = loader.getComponent(CascadeFacade.class);
     }
 
@@ -162,7 +163,7 @@ public class TestAsyncCascade2 {
         });
 
         bootstrap(map);
-        casf.asyncCascade("test", "zone", null, new Completion() {
+        casf.asyncCascade("test", "zone", null, new Completion(null) {
             @Override
             public void success() {
                 success5 = true;

@@ -12,7 +12,6 @@ import org.zstack.header.identity.PolicyInventory.Statement;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.network.l2.APIQueryL2NetworkMsg;
 import org.zstack.header.network.l2.APIQueryL2NetworkReply;
-import org.zstack.header.network.l2.L2NetworkConstant;
 import org.zstack.header.network.l2.L2NetworkInventory;
 import org.zstack.header.network.l3.*;
 import org.zstack.header.network.service.*;
@@ -31,12 +30,12 @@ import java.util.ArrayList;
 import static org.zstack.utils.CollectionDSL.list;
 
 public class TestPolicyForL3Network {
-	CLogger logger = Utils.getLogger(TestPolicyForL3Network.class);
-	Deployer deployer;
-	Api api;
-	ComponentLoader loader;
-	CloudBus bus;
-	DatabaseFacade dbf;
+    CLogger logger = Utils.getLogger(TestPolicyForL3Network.class);
+    Deployer deployer;
+    Api api;
+    ComponentLoader loader;
+    CloudBus bus;
+    DatabaseFacade dbf;
 
     @Before
     public void setUp() throws Exception {
@@ -59,8 +58,8 @@ public class TestPolicyForL3Network {
         return api.addIpRangeByCidr(l3Uuid, cidr, session);
     }
 
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
         L2NetworkInventory l2 = deployer.l2Networks.get("TestL2Network");
 
         IdentityCreator identityCreator = new IdentityCreator(api);
@@ -88,7 +87,7 @@ public class TestPolicyForL3Network {
         L3NetworkInventory l3 = api.createL3BasicNetwork(l2.getUuid(), session);
         api.updateL3Network(l3, session);
         IpRangeInventory ipr1 = addIpRange(l3.getUuid(), session);
-        IpRangeInventory ipr2 = addIpRange(l3.getUuid(), "10.0.0.0/24", session);
+        //IpRangeInventory ipr2 = addIpRange(l3.getUuid(), "10.0.0.0/24", session);
 
         APIQueryNetworkServiceProviderMsg msg = new APIQueryNetworkServiceProviderMsg();
         msg.addQueryCondition("name", QueryOp.EQ, "VirtualRouter");
@@ -145,16 +144,6 @@ public class TestPolicyForL3Network {
         success = false;
         try {
             addIpRange(l3.getUuid(), session);
-        } catch (ApiSenderException e) {
-            if (IdentityErrors.PERMISSION_DENIED.toString().equals(e.getError().getCode())) {
-                success = true;
-            }
-        }
-        Assert.assertTrue(success);
-
-        success = false;
-        try {
-            addIpRange(l3.getUuid(), "10.0.0.0/24", session);
         } catch (ApiSenderException e) {
             if (IdentityErrors.PERMISSION_DENIED.toString().equals(e.getError().getCode())) {
                 success = true;
@@ -232,7 +221,7 @@ public class TestPolicyForL3Network {
         l3 = api.createL3BasicNetwork(l2.getUuid(), session);
         api.updateL3Network(l3, session);
         ipr1 = addIpRange(l3.getUuid(), session);
-        ipr2 = addIpRange(l3.getUuid(), "10.0.0.0/24", session);
+        //ipr2 = addIpRange(l3.getUuid(), "10.0.0.0/24", session);
 
         msg = new APIQueryNetworkServiceProviderMsg();
         msg.addQueryCondition("name", QueryOp.EQ, "VirtualRouter");
@@ -274,16 +263,6 @@ public class TestPolicyForL3Network {
         success = false;
         try {
             addIpRange(l3.getUuid(), session);
-        } catch (ApiSenderException e) {
-            if (IdentityErrors.PERMISSION_DENIED.toString().equals(e.getError().getCode())) {
-                success = true;
-            }
-        }
-        Assert.assertTrue(success);
-
-        success = false;
-        try {
-            addIpRange(l3.getUuid(), "10.0.0.0/24", session);
         } catch (ApiSenderException e) {
             if (IdentityErrors.PERMISSION_DENIED.toString().equals(e.getError().getCode())) {
                 success = true;
@@ -367,7 +346,7 @@ public class TestPolicyForL3Network {
         qipr.setConditions(new ArrayList<QueryCondition>());
         api.query(qipr, APIQueryIpRangeReply.class, session);
 
-        api.getFreeIp(l3.getUuid(), null, 100, session);
+        api.getFreeIp(l3.getUuid(), null, 100, null, session);
         api.getIpAddressCapacityByAll(session);
         api.getL3NetworkTypes(session);
     }

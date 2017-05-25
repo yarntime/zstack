@@ -3,7 +3,7 @@
   <parent>
     <artifactId>zstack</artifactId>
     <groupId>org.zstack</groupId>
-    <version>0.9.0</version>
+    <version>2.0.0</version>
     <relativePath>..</relativePath>
   </parent>
   <artifactId>network</artifactId>
@@ -13,6 +13,11 @@
   		<artifactId>core</artifactId>
   		<version>${project.version}</version>
   	</dependency>
+	  <dependency>
+		  <groupId>org.zstack</groupId>
+		  <artifactId>core-groovy</artifactId>
+		  <version>${project.version}</version>
+	  </dependency>
   	<dependency>
   		<groupId>org.zstack</groupId>
   		<artifactId>utils</artifactId>
@@ -55,7 +60,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>aspectj-maven-plugin</artifactId>
-                <version>${aspectj.plugin.version}</version>
+                		<version>${aspectj.plugin.version}</version>
 				<executions>
 					<execution>
 						<goals>
@@ -67,6 +72,7 @@
 				<configuration>
 					<source>${project.java.version}</source>
 					<target>${project.java.version}</target>
+					<complianceLevel>${project.java.version}</complianceLevel>
 					<XnoInline>true</XnoInline>
 					<aspectLibraries>
 						<aspectLibrary>

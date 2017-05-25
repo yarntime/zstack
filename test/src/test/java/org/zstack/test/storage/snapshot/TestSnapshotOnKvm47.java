@@ -7,8 +7,6 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
-import org.zstack.header.image.ImageConstant.ImageMediaType;
-import org.zstack.header.image.ImageInventory;
 import org.zstack.header.image.ImageVO;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageStateEvent;
@@ -67,7 +65,7 @@ public class TestSnapshotOnKvm47 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -96,8 +94,8 @@ public class TestSnapshotOnKvm47 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test(expected = ApiSenderException.class)
-	public void test() throws ApiSenderException, InterruptedException {
+    @Test(expected = ApiSenderException.class)
+    public void test() throws ApiSenderException, InterruptedException {
         BackupStorageInventory sftp = deployer.backupStorages.get("sftp");
         BackupStorageInventory sftp1 = deployer.backupStorages.get("sftp1");
         VmInstanceInventory vm = deployer.vms.get("TestVm");

@@ -3,7 +3,9 @@ package org.zstack.header.vm;
 import org.zstack.header.configuration.PythonClass;
 import org.zstack.header.exception.CloudRuntimeException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @PythonClass
@@ -18,13 +20,27 @@ public enum VmInstanceState {
     Destroyed(VmInstanceStateEvent.destroyed),
     Migrating(VmInstanceStateEvent.migrating),
     Expunging(VmInstanceStateEvent.expunging),
+    Pausing(VmInstanceStateEvent.pausing),
+    Paused(VmInstanceStateEvent.paused),
+    Resuming(VmInstanceStateEvent.resuming),
     Error(null),
     Unknown(VmInstanceStateEvent.unknown);
 
+    public static List<VmInstanceState> intermediateStates = new ArrayList<VmInstanceState>();
+
     static {
+        intermediateStates.add(Starting);
+        intermediateStates.add(Stopping);
+        intermediateStates.add(Rebooting);
+        intermediateStates.add(Destroying);
+        intermediateStates.add(Migrating);
+        intermediateStates.add(Pausing);
+        intermediateStates.add(Resuming);
+
         Created.transactions(
                 new Transaction(VmInstanceStateEvent.starting, VmInstanceState.Starting),
-                new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying)
+                new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
+                new Transaction(VmInstanceStateEvent.destroyed, VmInstanceState.Destroyed)
         );
         Starting.transactions(
                 new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
@@ -33,11 +49,14 @@ public enum VmInstanceState {
                 new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown)
         );
         Running.transactions(
+                new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
                 new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
                 new Transaction(VmInstanceStateEvent.stopping, VmInstanceState.Stopping),
                 new Transaction(VmInstanceStateEvent.stopped, VmInstanceState.Stopped),
                 new Transaction(VmInstanceStateEvent.rebooting, VmInstanceState.Rebooting),
                 new Transaction(VmInstanceStateEvent.migrating, VmInstanceState.Migrating),
+                new Transaction(VmInstanceStateEvent.pausing, VmInstanceState.Pausing),
+                new Transaction(VmInstanceStateEvent.paused, VmInstanceState.Paused),
                 new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown)
         );
         Stopping.transactions(
@@ -66,10 +85,33 @@ public enum VmInstanceState {
                 new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown),
                 new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying)
         );
+
+        Paused.transactions(
+                new Transaction(VmInstanceStateEvent.resuming, VmInstanceState.Resuming),
+                new Transaction(VmInstanceStateEvent.stopped, VmInstanceState.Stopped),
+                new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
+                new Transaction(VmInstanceStateEvent.stopping, VmInstanceState.Stopping),
+                new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
+                new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown),
+                new Transaction(VmInstanceStateEvent.migrating, VmInstanceState.Migrating)
+        );
+        Pausing.transactions(
+                new Transaction(VmInstanceStateEvent.paused, VmInstanceState.Paused),
+                new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
+                new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
+                new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown)
+        );
+        Resuming.transactions(
+                new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
+                new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
+                new Transaction(VmInstanceStateEvent.paused, VmInstanceState.Paused),
+                new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown)
+        );
         Unknown.transactions(
                 new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
                 new Transaction(VmInstanceStateEvent.stopping, VmInstanceState.Stopping),
                 new Transaction(VmInstanceStateEvent.unknown, VmInstanceState.Unknown),
+                new Transaction(VmInstanceStateEvent.paused,VmInstanceState.Paused),
                 new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
                 new Transaction(VmInstanceStateEvent.stopped, VmInstanceState.Stopped)
         );
@@ -79,6 +121,9 @@ public enum VmInstanceState {
                 new Transaction(VmInstanceStateEvent.destroying, VmInstanceState.Destroying),
                 new Transaction(VmInstanceStateEvent.running, VmInstanceState.Running),
                 new Transaction(VmInstanceStateEvent.expunging, VmInstanceState.Expunging)
+        );
+        Destroyed.transactions(
+                new Transaction(VmInstanceStateEvent.stopped, VmInstanceState.Stopped)
         );
     }
 
@@ -104,7 +149,7 @@ public enum VmInstanceState {
         return drivenEvent;
     }
 
-    private void transactions(Transaction...transactions) {
+    private void transactions(Transaction... transactions) {
         for (Transaction tran : transactions) {
             transactionMap.put(tran.event, tran);
         }

@@ -14,16 +14,22 @@ import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  */
 public class CascadeFacadeImpl implements CascadeFacade, Component {
     private static final CLogger logger = Utils.getLogger(CascadeFacadeImpl.class);
 
-    private class Node {
+    private class Node implements Comparable<Node> {
         private CascadeExtensionPoint extension;
-        private List<Node> edges;
+        private TreeSet<Node> edges;
         private String name;
+
+        @Override
+        public int compareTo(Node n) {
+            return this.getName().compareTo(n.getName());
+        }
 
         public CascadeExtensionPoint getExtension() {
             return extension;
@@ -33,11 +39,11 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
             this.extension = extension;
         }
 
-        public List<Node> getEdges() {
+        public TreeSet<Node> getEdges() {
             return edges;
         }
 
-        public void setEdges(List<Node> edges) {
+        public void setEdges(TreeSet<Node> edges) {
             this.edges = edges;
         }
 
@@ -50,16 +56,21 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
         }
     }
 
-    private static class TreeNode {
+    private static class TreeNode implements Comparable<TreeNode> {
         private Node node;
-        private HashSet<TreeNode> leafs;
+        private TreeSet<TreeNode> leafs;
+
+        @Override
+        public int compareTo(TreeNode t) {
+            return this.node.getName().compareTo(t.node.getName());
+        }
     }
 
     @Autowired
     private PluginRegistry pluginRgty;
 
-    private Map<String, Node> nodes = new HashMap<String, Node>();
-    private Map<String, TreeNode> cascadeTree = new HashMap<String, TreeNode>();
+    private Map<String, Node> nodes = new HashMap<>();
+    private Map<String, TreeNode> cascadeTree = new HashMap<>();
 
     private void doSyncCascade(TreeNode treeNode, boolean init, CascadeAction action) throws CascadeException {
         CascadeAction currentAction;
@@ -101,20 +112,24 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
     private void checkForNullElement(Node node, CascadeAction currentAction) {
         Object parentIssuerContext = currentAction.getParentIssuerContext();
         if (parentIssuerContext != null && parentIssuerContext instanceof List) {
-            List lst = (List)parentIssuerContext;
+            List lst = (List) parentIssuerContext;
             for (Object obj : lst) {
                 if (obj == null) {
-                    throw new CloudRuntimeException(String.format("CascadeExtensionPoint[%s] returns parent content that is a List but containing NULL element", node.getExtension().getClass().getName()));
+                    throw new CloudRuntimeException(
+                            String.format("CascadeExtensionPoint[%s] returns parent content that is a List but containing NULL element",
+                                    node.getExtension().getClass().getName()));
                 }
             }
         }
 
         Object rootIssuerContext = currentAction.getRootIssuerContext();
         if (rootIssuerContext != null && rootIssuerContext instanceof List) {
-            List lst = (List)rootIssuerContext;
+            List lst = (List) rootIssuerContext;
             for (Object obj : lst) {
                 if (obj == null) {
-                    throw new CloudRuntimeException(String.format("CascadeExtensionPoint[%s] returns root content that is a List but containing NULL element", node.getExtension().getClass().getName()));
+                    throw new CloudRuntimeException(
+                            String.format("CascadeExtensionPoint[%s] returns root content that is a List but containing NULL element",
+                                    node.getExtension().getClass().getName()));
                 }
             }
         }
@@ -157,15 +172,24 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
 
     @Override
     public void asyncCascade(String actionCode, String issuer, Object context, Completion completion) {
-        CascadeAction action = new CascadeAction().setRootIssuer(issuer).setRootIssuerContext(context)
-                .setParentIssuer(issuer).setParentIssuerContext(context).setActionCode(actionCode);
+        CascadeAction action = new CascadeAction().
+                setRootIssuer(issuer).
+                setRootIssuerContext(context).
+                setParentIssuer(issuer).
+                setParentIssuerContext(context).
+                setActionCode(actionCode);
         asyncCascade(action, completion);
     }
 
     @Override
     public void asyncCascadeFull(String actionCode, String issuer, Object context, Completion completion) {
-        CascadeAction action = new CascadeAction().setRootIssuer(issuer).setRootIssuerContext(context)
-                .setParentIssuer(issuer).setParentIssuerContext(context).setActionCode(actionCode).setFullTraverse(true);
+        CascadeAction action = new CascadeAction().
+                setRootIssuer(issuer).
+                setRootIssuerContext(context).
+                setParentIssuer(issuer).
+                setParentIssuerContext(context).
+                setActionCode(actionCode).
+                setFullTraverse(true);
         asyncCascade(action, completion);
     }
 
@@ -177,8 +201,8 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
         assert action.getActionCode() != null;
 
         TreeNode root = cascadeTree.get(action.getRootIssuer());
-        DebugUtils.Assert(root!=null, String.format("found no CascadeExtension for %s", action.getRootIssuer()));
-        List<Bucket> paths = new ArrayList<Bucket>();
+        DebugUtils.Assert(root != null, String.format("found no CascadeExtension for %s", action.getRootIssuer()));
+        List<Bucket> paths = new ArrayList<>();
         collectPathsForAsyncCascade(root, true, action.isFullTraverse(), action, paths);
         FlowChain chain = FlowChainBuilder.newSimpleFlowChain();
         for (Bucket path : paths) {
@@ -187,8 +211,9 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
             chain.then(new NoRollbackFlow() {
                 @Override
                 public void run(final FlowTrigger trigger, Map data) {
-                    logger.debug(String.format("[Async cascade (%s)]: %s --> %s", caction.getActionCode(), caction.getParentIssuer(), node.getName()));
-                    node.getExtension().asyncCascade(caction, new Completion() {
+                    logger.debug(String.format("[Async cascade (%s)]: %s --> %s",
+                            caction.getActionCode(), caction.getParentIssuer(), node.getName()));
+                    node.getExtension().asyncCascade(caction, new Completion(trigger) {
                         @Override
                         public void success() {
                             trigger.next();
@@ -203,12 +228,12 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
             });
         }
 
-        chain.done(new FlowDoneHandler() {
+        chain.done(new FlowDoneHandler(completion) {
             @Override
             public void handle(Map data) {
                 completion.success();
             }
-        }).error(new FlowErrorHandler() {
+        }).error(new FlowErrorHandler(completion) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
                 completion.fail(errCode);
@@ -237,7 +262,7 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
 
     private void traverse(Node node, List<Node> resolved, List<List<Node>> paths) {
         if (resolved.contains(node)) {
-            List<Node> path = new ArrayList<Node>();
+            List<Node> path = new ArrayList<>();
             path.addAll(resolved);
             paths.add(path);
             return;
@@ -250,7 +275,7 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                 traverse(e, resolved, paths);
             }
         } else {
-            List<Node> path = new ArrayList<Node>();
+            List<Node> path = new ArrayList<>();
             path.addAll(resolved);
             paths.add(path);
         }
@@ -261,23 +286,23 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
     private TreeNode createTraversingTree(String issuer) {
         Node node = nodes.get(issuer);
 
-        List<List<Node>> paths = new ArrayList<List<Node>>();
+        List<List<Node>> paths = new ArrayList<>();
         if (node.getEdges().isEmpty()) {
-            List<Node> resolved = new ArrayList<Node>();
+            List<Node> resolved = new ArrayList<>();
             resolved.add(node);
             traverse(node, resolved, paths);
         } else {
             for (Node n : node.getEdges()) {
-                List<Node> resolved = new ArrayList<Node>();
+                List<Node> resolved = new ArrayList<>();
                 resolved.add(node);
                 traverse(n, resolved, paths);
             }
         }
 
 
-        List<List<String>> ret = new ArrayList<List<String>>();
+        List<List<String>> ret = new ArrayList<>();
         for (List<Node> path : paths) {
-            List<String> spath = new ArrayList<String>();
+            List<String> spath = new ArrayList<>();
             for (Node n : path) {
                 spath.add(n.getName());
             }
@@ -300,10 +325,10 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
             }
         }
 
-        Map<String, TreeNode> root = new HashMap<String, TreeNode>();
+        Map<String, TreeNode> root = new HashMap<>();
         Map<String, TreeNode> prev = root;
         Map<String, TreeNode> curr = prev;
-        for (int i=0; i<maxLevel; i++) {
+        for (int i = 0; i < maxLevel; i++) {
             for (List<Node> path : paths) {
                 if (i >= path.size()) {
                     continue;
@@ -314,7 +339,7 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                 if (tn == null) {
                     tn = new TreeNode();
                     tn.node = n;
-                    tn.leafs = new HashSet<TreeNode>();
+                    tn.leafs = new TreeSet<>();
                     curr.put(n.getName(), tn);
                 }
 
@@ -328,7 +353,7 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                 pn.leafs.add(tn);
             }
             prev = curr;
-            curr = new HashMap<String, TreeNode>();
+            curr = new HashMap<>();
         }
 
         assert root.size() == 1;
@@ -343,7 +368,7 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                 n = new Node();
                 n.setName(ext.getCascadeResourceName());
                 n.setExtension(ext);
-                n.setEdges(new ArrayList<Node>());
+                n.setEdges(new TreeSet<>());
                 nodes.put(n.getName(), n);
             }
 
@@ -352,10 +377,12 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                 if (p == null) {
                     p = new Node();
                     p.setName(parent);
-                    p.setEdges(new ArrayList<Node>());
+                    p.setEdges(new TreeSet<>());
                     CascadeExtensionPoint dext = exts.get(parent);
-                    if(dext == null) {
-                        throw new CloudRuntimeException(String.format("cannot find parent CascadeExtensionPoint[%s] for CascadeExtensionPoint[name: %s, class: %s]", parent, ext.getCascadeResourceName(), ext.getClass().getName()));
+                    if (dext == null) {
+                        throw new CloudRuntimeException(
+                                String.format("cannot find parent CascadeExtensionPoint[%s] for CascadeExtensionPoint[name: %s, class: %s]",
+                                        parent, ext.getCascadeResourceName(), ext.getClass().getName()));
                     }
                     p.setExtension(dext);
                     nodes.put(parent, p);
@@ -366,13 +393,70 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
 
         for (Node n : nodes.values()) {
             if (n.getExtension().getEdgeNames().contains(n.getExtension().getCascadeResourceName())) {
-                throw new CloudRuntimeException(String.format("CascadeExtensionPoint[%s] is self referenced, a CascadeExtensionPoint cannot put itself as parent", n.getExtension().getClass().getName()));
+                throw new CloudRuntimeException(
+                        String.format("CascadeExtensionPoint[%s] is self referenced, a CascadeExtensionPoint cannot put itself as parent",
+                                n.getExtension().getClass().getName()));
             }
         }
     }
 
+    private class CascadeWrapper implements CascadeExtensionPoint {
+        CascadeExtensionPoint origin;
+        List<CascadeExtensionPoint> addons = new ArrayList<>();
+
+        public CascadeWrapper(CascadeExtensionPoint origin) {
+            this.origin = origin;
+        }
+
+        private CascadeExtensionPoint findExtensionPointByParent(String parent) {
+            if (origin.getCascadeResourceName().equals(parent) || origin.getEdgeNames().contains(parent)) {
+                return origin;
+            } else {
+                Optional<CascadeExtensionPoint> o = addons.stream().filter(c->c.getEdgeNames().contains(parent)).findFirst();
+                DebugUtils.Assert(o.isPresent(), String.format("cannot find any cascade extension point has the parent[%s] for the resource[%s]",
+                        parent, origin.getCascadeResourceName()));
+                return o.get();
+            }
+        }
+
+        @Override
+        public void syncCascade(CascadeAction action) throws CascadeException {
+            findExtensionPointByParent(action.getParentIssuer()).syncCascade(action);
+        }
+
+        @Override
+        public void asyncCascade(CascadeAction action, Completion completion) {
+            findExtensionPointByParent(action.getParentIssuer()).asyncCascade(action, completion);
+        }
+
+        @Override
+        public List<String> getEdgeNames() {
+            return addons.isEmpty() ? origin.getEdgeNames() : new Callable<List<String>>() {
+                @Override
+                public List<String> call() {
+                    List<String> es = new ArrayList<>();
+                    es.addAll(origin.getEdgeNames());
+                    for (CascadeExtensionPoint a : addons) {
+                        es.addAll(a.getEdgeNames());
+                    }
+                    return es;
+                }
+            }.call();
+        }
+
+        @Override
+        public String getCascadeResourceName() {
+            return origin.getCascadeResourceName();
+        }
+
+        @Override
+        public CascadeAction createActionForChildResource(CascadeAction action) {
+            return findExtensionPointByParent(action.getParentIssuer()).createActionForChildResource(action);
+        }
+    }
+
     private void populateNodes() {
-        Map<String, CascadeExtensionPoint> exts = new HashMap<String, CascadeExtensionPoint>();
+        Map<String, CascadeExtensionPoint> exts = new HashMap<>();
         for (CascadeExtensionPoint extp : pluginRgty.getExtensionList(CascadeExtensionPoint.class)) {
             CascadeExtensionPoint oext = exts.get(extp.getCascadeResourceName());
             if (oext != null) {
@@ -380,7 +464,25 @@ public class CascadeFacadeImpl implements CascadeFacade, Component {
                         extp.getClass().getName(), oext.getClass().getName(), extp.getCascadeResourceName()));
             }
 
-            exts.put(extp.getCascadeResourceName(), extp);
+            exts.put(extp.getCascadeResourceName(), new CascadeWrapper(extp));
+        }
+
+        for (CascadeExtensionPoint e : exts.values()) {
+            CascadeWrapper w = (CascadeWrapper) e;
+
+            for (CascadeAddOnExtensionPoint a : pluginRgty.getExtensionList(CascadeAddOnExtensionPoint.class)) {
+                CascadeExtensionPoint c = a.cascadeAddOn(e.getCascadeResourceName());
+                if (c != null) {
+                    if (!c.getCascadeResourceName().equals(w.getCascadeResourceName())) {
+                        throw new CloudRuntimeException(String.format("the resourceName[%s] of the addon returned" +
+                                " by %s is not %s. The plugin cannot populate an cascade addon with different" +
+                                " resource name", c.getCascadeResourceName(), a.getClass(), w.getCascadeResourceName()));
+                    }
+
+                    w.addons.add(c);
+                }
+            }
+
         }
 
         populateCascadeNodes(exts);

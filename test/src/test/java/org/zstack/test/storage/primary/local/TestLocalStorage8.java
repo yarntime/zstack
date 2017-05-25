@@ -13,7 +13,7 @@ import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
 import org.zstack.kvm.APIAddKVMHostMsg;
-import org.zstack.storage.primary.local.LocalStorageHostRefVO;
+import org.zstack.storage.primary.local.LocalStorageHostRefVOFinder;
 import org.zstack.storage.primary.local.LocalStorageSimulatorConfig;
 import org.zstack.storage.primary.local.LocalStorageSimulatorConfig.Capacity;
 import org.zstack.test.*;
@@ -25,7 +25,7 @@ import org.zstack.utils.data.SizeUnit;
  * 2. add a host
  * 3. delete the host
  * 4. re-add host again
- *
+ * <p>
  * confirm the local storage capacity is correctly set
  */
 public class TestLocalStorage8 {
@@ -63,10 +63,12 @@ public class TestLocalStorage8 {
         api = deployer.getApi();
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() throws ApiSenderException, InterruptedException {
+
+    @Test
+    public void test() throws ApiSenderException, InterruptedException {
         ClusterInventory cluster = deployer.clusters.get("Cluster1");
+        PrimaryStorageInventory local = deployer.primaryStorages.get("local");
+        PrimaryStorageInventory local2 = deployer.primaryStorages.get("local2");
 
         APIAddKVMHostMsg msg = new APIAddKVMHostMsg();
         msg.setName("host1");
@@ -84,10 +86,15 @@ public class TestLocalStorage8 {
         evt = sender.send(msg, APIAddHostEvent.class);
         host1 = evt.getInventory();
 
-        Assert.assertTrue(dbf.isExist(host1.getUuid(), LocalStorageHostRefVO.class));
+        PrimaryStorageVO lvo;
+        if (new LocalStorageHostRefVOFinder().isExist(host1.getUuid(), local.getUuid())) {
+            lvo = dbf.findByUuid(local.getUuid(), PrimaryStorageVO.class);
+        } else {
+            Assert.assertTrue(new LocalStorageHostRefVOFinder().isExist(host1.getUuid(), local2.getUuid()));
+            lvo = dbf.findByUuid(local2.getUuid(), PrimaryStorageVO.class);
+        }
 
-        PrimaryStorageInventory local = deployer.primaryStorages.get("local");
-        PrimaryStorageVO lvo = dbf.findByUuid(local.getUuid(), PrimaryStorageVO.class);
+
         Assert.assertEquals(totalSize, lvo.getCapacity().getTotalCapacity());
         Assert.assertEquals(totalSize, lvo.getCapacity().getAvailableCapacity());
         Assert.assertEquals(totalSize, lvo.getCapacity().getTotalPhysicalCapacity());

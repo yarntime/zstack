@@ -4,8 +4,27 @@ import org.zstack.header.message.MessageReply;
 
 public class DownloadImageReply extends MessageReply {
     private long size;
+    private Long actualSize;
     private String installPath;
     private String md5sum;
+    private String format;
+
+    public String getFormat() {
+        return format;
+    }
+
+    public void setFormat(String format) {
+        this.format = format;
+    }
+
+
+    public Long getActualSize() {
+        return actualSize;
+    }
+
+    public void setActualSize(Long actualSize) {
+        this.actualSize = actualSize;
+    }
 
     public long getSize() {
         return size;
@@ -32,6 +51,6 @@ public class DownloadImageReply extends MessageReply {
     }
 
     public DownloadImageReply() {
-	    super();
+        super();
     }
 }

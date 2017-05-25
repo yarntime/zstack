@@ -7,9 +7,9 @@ import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.cloudbus.CloudBusIN;
 import org.zstack.core.cloudbus.MessageSafe;
 import org.zstack.core.componentloader.ComponentLoader;
-import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.AbstractService;
 import org.zstack.header.Service;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.message.Message;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.message.NeedReplyMessage;
@@ -27,7 +27,7 @@ public class TestMessageSafe {
     CountDownLatch latch = new CountDownLatch(1);
     boolean isSuccess = false;
     Service serv;
-    
+
     public static class HelloWorldMsg extends NeedReplyMessage {
     }
 
@@ -56,9 +56,9 @@ public class TestMessageSafe {
         public String getId() {
             return this.getClass().getCanonicalName();
         }
-        
+
     }
-    
+
     @Before
     public void setUp() throws Exception {
         BeanConstructor con = new BeanConstructor();
@@ -73,7 +73,7 @@ public class TestMessageSafe {
         HelloWorldMsg msg = new HelloWorldMsg();
         msg.setServiceId(FakeService.class.getCanonicalName());
         msg.setTimeout(TimeUnit.SECONDS.toMillis(10));
-        bus.send(msg, new CloudBusCallBack() {
+        bus.send(msg, new CloudBusCallBack(null) {
             @Override
             public void run(MessageReply reply) {
                 if (!reply.isSuccess() && !SysErrors.TIMEOUT.toString().equals(reply.getError().getCode())) {

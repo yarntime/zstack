@@ -1,9 +1,13 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
+import org.zstack.header.message.APIEvent;
 import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
 import org.zstack.header.network.l3.L3NetworkVO;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 
 /**
  * @api
@@ -44,10 +48,15 @@ import org.zstack.header.network.l3.L3NetworkVO;
  * see :ref:`APIAttachSecurityGroupToL3NetworkEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups/{securityGroupUuid}/l3-networks/{l3NetworkUuid}",
+        method = HttpMethod.POST,
+        responseClass = APIAttachSecurityGroupToL3NetworkEvent.class
+)
 public class APIAttachSecurityGroupToL3NetworkMsg extends APIMessage {
     @APIParam(resourceType=SecurityGroupVO.class, checkAccount = true, operationTarget = true)
     private String securityGroupUuid;
-    @APIParam(resourceType = L3NetworkVO.class, checkAccount = true, operationTarget = true)
+    @APIParam(resourceType = L3NetworkVO.class)
     private String l3NetworkUuid;
     public String getSecurityGroupUuid() {
         return securityGroupUuid;
@@ -61,4 +70,26 @@ public class APIAttachSecurityGroupToL3NetworkMsg extends APIMessage {
     public void setL3NetworkUuid(String l3NetworkUuid) {
         this.l3NetworkUuid = l3NetworkUuid;
     }
+ 
+    public static APIAttachSecurityGroupToL3NetworkMsg __example__() {
+        APIAttachSecurityGroupToL3NetworkMsg msg = new APIAttachSecurityGroupToL3NetworkMsg();
+        msg.setSecurityGroupUuid(uuid());
+        msg.setL3NetworkUuid(uuid());
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Attached security group[uuid:%s]",securityGroupUuid).resource(l3NetworkUuid,L3NetworkVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

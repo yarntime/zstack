@@ -1,5 +1,5 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <properties>
         <maven.resources.overwrite>true</maven.resources.overwrite>
     </properties>
@@ -7,11 +7,12 @@
     <parent>
         <artifactId>zstack</artifactId>
         <groupId>org.zstack</groupId>
-        <version>0.9.0</version>
+        <version>2.0.0</version>
         <relativePath>..</relativePath>
     </parent>
     <artifactId>test</artifactId>
 
+    <!--
     <repositories>
         <repository>
             <id>repository.jboss.org</id>
@@ -19,6 +20,7 @@
             <url>http://repository.jboss.org/nexus/content/groups/public-jboss/</url>
         </repository>
     </repositories>
+-->
 
     <dependencies>
         <dependency>
@@ -26,10 +28,27 @@
             <artifactId>junit</artifactId>
             <version>4.10</version>
         </dependency>
+        <dependency>
+            <groupId>org.zapodot</groupId>
+            <artifactId>embedded-ldap-junit</artifactId>
+            <version>0.5.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>1.10.19</version>
+        </dependency>
 
         <dependency>
             <groupId>org.zstack</groupId>
             <artifactId>core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>core-groovy</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -94,11 +113,6 @@
         </dependency>
         <dependency>
             <groupId>org.zstack</groupId>
-            <artifactId>iscsiPrimaryStorage</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.zstack</groupId>
             <artifactId>localstorage</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -107,6 +121,22 @@
             <artifactId>ceph</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>sharedMountPointPrimaryStorage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>fusionstor</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>ldap</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.jboss.shrinkwrap</groupId>
             <artifactId>shrinkwrap-api</artifactId>
@@ -120,20 +150,14 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.tomcat.embed</groupId>
-            <artifactId>tomcat-embed-core</artifactId>
-            <version>7.0.30</version>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-server</artifactId>
+            <version>9.2.9.v20150224</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.tomcat.embed</groupId>
-            <artifactId>tomcat-embed-logging-juli</artifactId>
-            <version>7.0.30</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tomcat.embed</groupId>
-            <artifactId>tomcat-embed-jasper</artifactId>
-            <version>7.0.30</version>
-            <scope>test</scope>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-webapp</artifactId>
+            <version>9.2.9.v20150224</version>
         </dependency>
 
         <dependency>
@@ -150,7 +174,6 @@
             <groupId>org.zstack</groupId>
             <artifactId>sftpBackupStorage</artifactId>
             <version>${project.version}</version>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.zstack</groupId>
@@ -172,6 +195,35 @@
             <artifactId>mediator</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>flatNetworkProvider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>rest</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>vxlan</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>sdk</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zstack</groupId>
+            <artifactId>testlib</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+	<dependency>
+	    <groupId>com.github.javaparser</groupId>
+	    <artifactId>javaparser-core</artifactId>
+	</dependency>
     </dependencies>
 
     <build>
@@ -183,6 +235,9 @@
                 <configuration>
                     <!--
                     <argLine>-XX:+UseConcMarkSweepGC -Xmx8192m -Dcom.sun.management.jmxremote=true -Dcom.sun.management.jmxremote.port=10000 -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.authenticate=false -Djava.rmi.server.hostname=192.168.0.199 -Djava.net.preferIPv4Stack=true</argLine>
+            <useSystemClassLoader>false</useSystemClassLoader>
+                    <forkCount>0</forkCount>
+            <useManifestOnlyJar>false</useManifestOnlyJar>
                     -->
                 </configuration>
             </plugin>
@@ -196,6 +251,31 @@
                     <debug>true</debug>
                 </configuration>
             </plugin>
+	    <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.6.1</version>
+                <configuration>
+                    <compilerId>groovy-eclipse-compiler</compilerId>
+                    <source>${project.java.version}</source>
+                    <target>${project.java.version}</target>
+		            <debuglevel>lines,vars,source</debuglevel>
+		            <debug>true</debug>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.codehaus.groovy</groupId>
+                        <artifactId>groovy-eclipse-compiler</artifactId>
+                        <version>2.9.2-01</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.codehaus.groovy</groupId>
+                        <artifactId>groovy-eclipse-batch</artifactId>
+                        <version>2.4.3-01</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>aspectj-maven-plugin</artifactId>
@@ -211,6 +291,7 @@
                 <configuration>
                     <source>${project.java.version}</source>
                     <target>${project.java.version}</target>
+                    <complianceLevel>${project.java.version}</complianceLevel>
                     <XnoInline>true</XnoInline>
                     <aspectLibraries>
                         <aspectLibrary>
@@ -234,7 +315,7 @@
                 <version>2.5</version>
                 <executions>
                     <execution>
-                        <id>copy-resources</id>
+                        <id>copy-conf</id>
                         <!-- here the phase you need -->
                         <phase>validate</phase>
                         <goals>
@@ -242,10 +323,10 @@
                         </goals>
                         <configuration>
                             <outputDirectory>target/test-classes</outputDirectory>
+                            <includeEmptyDirs>true</includeEmptyDirs>
                             <resources>
                                 <resource>
                                     <directory>../conf</directory>
-                                    <filtering>true</filtering>
                                 </resource>
                             </resources>
                         </configuration>

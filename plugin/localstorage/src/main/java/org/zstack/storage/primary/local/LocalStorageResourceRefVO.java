@@ -9,10 +9,7 @@ import org.zstack.header.vo.SoftDeletionCascade;
 import org.zstack.header.vo.SoftDeletionCascades;
 import org.zstack.header.volume.VolumeVO;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 import java.sql.Timestamp;
 
 /**
@@ -20,6 +17,7 @@ import java.sql.Timestamp;
  */
 @Entity
 @Table
+@IdClass(CompositePrimaryKeyForLocalStorageResourceRefVO.class)
 @SoftDeletionCascades({
         @SoftDeletionCascade(parent = VolumeVO.class, joinColumn = "resourceUuid"),
         @SoftDeletionCascade(parent = VolumeSnapshotVO.class, joinColumn = "resourceUuid")
@@ -30,11 +28,14 @@ public class LocalStorageResourceRefVO {
     private String resourceUuid;
 
     @Column
+    @Id
     @ForeignKey(parentEntityClass = PrimaryStorageEO.class, onDeleteAction = ReferenceOption.CASCADE)
     private String primaryStorageUuid;
 
+    // @ForeignKey(parentEntityClass = HostEO.class, onDeleteAction = ReferenceOption.CASCADE)
+    // Do not cascade delete LocalStorageResourceRefVO when delete HostEO, If the cascade delete is opened, the ImageVO/VolumeVO/VolumeSnapshotVO/ImageCacheVO data will not be cleaned when delete HostEO.
     @Column
-    @ForeignKey(parentEntityClass = HostEO.class, onDeleteAction = ReferenceOption.CASCADE)
+    @Id
     private String hostUuid;
 
     @Column
@@ -48,6 +49,11 @@ public class LocalStorageResourceRefVO {
 
     @Column
     private Timestamp lastOpDate;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
 
     public long getSize() {
         return size;

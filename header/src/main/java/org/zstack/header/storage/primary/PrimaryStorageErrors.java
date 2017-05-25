@@ -2,10 +2,11 @@ package org.zstack.header.storage.primary;
 
 /**
  */
-public enum  PrimaryStorageErrors {
+public enum PrimaryStorageErrors {
     ALLOCATE_ERROR(1000),
     ATTACH_ERROR(1001),
-    DETACH_ERROR(1002);
+    DETACH_ERROR(1002),
+    DISCONNECTED(1003);
 
     private String code;
 

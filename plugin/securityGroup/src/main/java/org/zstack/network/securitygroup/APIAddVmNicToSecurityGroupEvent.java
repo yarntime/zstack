@@ -1,6 +1,10 @@
 package org.zstack.network.securitygroup;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
+import java.sql.Timestamp;
+
 /**
  *@apiResult
  *
@@ -17,11 +21,18 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse
 public class APIAddVmNicToSecurityGroupEvent extends APIEvent {
     public APIAddVmNicToSecurityGroupEvent(String apiId) {
         super(apiId);
     }
     
     public APIAddVmNicToSecurityGroupEvent() {
+    }
+ 
+    public static APIAddVmNicToSecurityGroupEvent __example__() {
+        APIAddVmNicToSecurityGroupEvent event = new APIAddVmNicToSecurityGroupEvent();
+        event.setSuccess(true);
+        return event;
     }
 }

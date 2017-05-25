@@ -12,10 +12,12 @@ public class IdentityGlobalConfig {
 
     @GlobalConfigValidation(numberGreaterThan = 0)
     public static GlobalConfig MAX_CONCURRENT_SESSION = new GlobalConfig(CATEGORY, "session.maxConcurrent");
-    @GlobalConfigValidation(numberGreaterThan = 0)
+    @GlobalConfigValidation(numberGreaterThan = 0,numberLessThan = 31536000)
     public static GlobalConfig SESSION_TIMEOUT = new GlobalConfig(CATEGORY, "session.timeout");
     @GlobalConfigValidation(numberGreaterThan = 0)
-    public static GlobalConfig SESSION_CELANUP_INTERVAL = new GlobalConfig(CATEGORY, "session.cleanup.interval");
+    public static GlobalConfig SESSION_CLEANUP_INTERVAL = new GlobalConfig(CATEGORY, "session.cleanup.interval");
     @GlobalConfigValidation
     public static GlobalConfig SHOW_ALL_RESOURCE_TO_ADMIN = new GlobalConfig(CATEGORY, "admin.showAllResource");
+    @GlobalConfigValidation(notEmpty = false)
+    public static GlobalConfig ACCOUNT_API_CONTROL = new GlobalConfig(CATEGORY, "account.api.control");
 }

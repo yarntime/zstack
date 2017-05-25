@@ -36,4 +36,9 @@
     <message>
         <name>org.zstack.header.storage.snapshot.APIUpdateVolumeSnapshotMsg</name>
     </message>
+    <message>
+        <name>org.zstack.header.volume.APICreateVolumeSnapshotSchedulerMsg </name>
+        <interceptor>SchedulerApiInterceptor</interceptor>
+        <interceptor>VolumeSnapshotApiInterceptor</interceptor>
+    </message>
 </service>

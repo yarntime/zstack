@@ -7,11 +7,8 @@ import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
-import org.zstack.header.network.l3.L3NetworkInventory;
-import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmNicInventory;
 import org.zstack.network.service.lb.*;
-import org.zstack.network.service.vip.VipVO;
 import org.zstack.network.service.virtualrouter.lb.VirtualRouterLoadBalancerBackend.LbTO;
 import org.zstack.network.service.virtualrouter.lb.VirtualRouterLoadBalancerBackend.RefreshLbCmd;
 import org.zstack.simulator.appliancevm.ApplianceVmSimulatorConfig;
@@ -23,28 +20,25 @@ import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.function.Function;
+import org.zstack.utils.gson.JSONObjectUtil;
 
-import static org.zstack.utils.CollectionDSL.e;
-import static org.zstack.utils.CollectionDSL.list;
-import static org.zstack.utils.CollectionDSL.map;
+import static org.zstack.utils.CollectionDSL.*;
 
 /**
- * 
  * @author frank
- * 
- * 1. create a lb
- * 2. add a listener with a nic
- *
- * confirm the system tags are created as default
- *
- * 3. remove the listener
- *
- * confirm the system tags are removed
- *
- * 4. add the listener again with system tags specified with a nic
- *
- * confirm the system tags are created as specified
- *
+ *         <p>
+ *         1. create a lb
+ *         2. add a listener with a nic
+ *         <p>
+ *         confirm the system tags are created as default
+ *         <p>
+ *         3. remove the listener
+ *         <p>
+ *         confirm the system tags are removed
+ *         <p>
+ *         4. add the listener again with system tags specified with a nic
+ *         <p>
+ *         confirm the system tags are created as specified
  */
 public class TestVirtualRouterLb13 {
     Deployer deployer;
@@ -75,7 +69,7 @@ public class TestVirtualRouterLb13 {
         dbf = loader.getComponent(DatabaseFacade.class);
         session = api.loginAsAdmin();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
         LoadBalancerInventory lb = deployer.loadBalancers.get("lb");
@@ -227,17 +221,22 @@ public class TestVirtualRouterLb13 {
         final String ns7 = LoadBalancerSystemTags.BALANCER_ALGORITHM.instantiateTag(
                 map(e(LoadBalancerSystemTags.BALANCER_ALGORITHM_TOKEN, BALANCER_ALGORITHM))
         );
-        String HEALTH_TARGET = "TCP:5000";
+        String HEALTH_TARGET = "tcp:5000";
         final String ns8 = LoadBalancerSystemTags.HEALTH_TARGET.instantiateTag(
                 map(e(LoadBalancerSystemTags.HEALTH_TARGET_TOKEN, HEALTH_TARGET))
         );
 
         vconfig.refreshLbCmds.clear();
-        LoadBalancerListenerInventory l2 = api.createLoadBalancerListener(l, list(ns1, ns2, ns3, ns4, ns5, ns6, ns7, ns8), null);
+        final LoadBalancerListenerInventory l2 = api.createLoadBalancerListener(l, list(ns1, ns2, ns3, ns4, ns5, ns6, ns7, ns8), null);
         api.addVmNicToLoadBalancerListener(l2.getUuid(), nic.getUuid());
 
         cmd = vconfig.refreshLbCmds.get(0);
-        to = cmd.getLbs().get(0);
+        to = CollectionUtils.find(cmd.getLbs(), new Function<LbTO, LbTO>() {
+            @Override
+            public LbTO call(LbTO arg) {
+                return arg.getListenerUuid().equals(l2.getUuid()) ? arg : null;
+            }
+        });
         String ss1 = LoadBalancerSystemTags.CONNECTION_IDLE_TIMEOUT.getTokenByResourceUuid(l.getUuid(), LoadBalancerSystemTags.CONNECTION_IDLE_TIMEOUT_TOKEN);
         val = Long.valueOf(ss1);
         Assert.assertEquals(CONNECTION_IDLE_TIMEOUT, val);
@@ -247,7 +246,7 @@ public class TestVirtualRouterLb13 {
                 return arg.equals(ns1) ? arg : null;
             }
         });
-        Assert.assertNotNull(tval);
+        Assert.assertNotNull(JSONObjectUtil.toJsonString(to), tval);
 
         String ss2 = LoadBalancerSystemTags.HEALTH_INTERVAL.getTokenByResourceUuid(l.getUuid(), LoadBalancerSystemTags.HEALTH_INTERVAL_TOKEN);
         val = Long.valueOf(ss2);

@@ -3,11 +3,13 @@ package org.zstack.test.lb;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.zstack.compute.vm.VmGlobalConfig;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.network.l3.L3NetworkInventory;
+import org.zstack.header.vm.VmInstanceDeletionPolicyManager.VmInstanceDeletionPolicy;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.header.vm.VmNicInventory;
 import org.zstack.header.vm.VmNicVO;
@@ -31,19 +33,14 @@ import org.zstack.utils.function.Function;
 import java.util.List;
 
 /**
- * 
  * @author frank
- * 
- * @condition
- * 1. create a lb
+ * @condition 1. create a lb
  * 2. use separate vr
- *
- * @test
- * confirm there are two vrs created
+ * @test confirm there are two vrs created
  * confirm the ip of guest nic of the second vr is not the gateway of the guest L3
- *
+ * <p>
  * 3. delete the Vip
- *
+ * <p>
  * confirm the lb is deleted
  */
 public class TestVirtualRouterLb2 {
@@ -75,9 +72,10 @@ public class TestVirtualRouterLb2 {
         dbf = loader.getComponent(DatabaseFacade.class);
         session = api.loginAsAdmin();
     }
-    
+
     @Test
     public void test() throws ApiSenderException {
+        VmGlobalConfig.VM_DELETION_POLICY.updateValue(VmInstanceDeletionPolicy.Direct.toString());
         final L3NetworkInventory gnw = deployer.l3Networks.get("GuestNetwork");
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         VmNicInventory nic = vm.findNic(gnw.getUuid());

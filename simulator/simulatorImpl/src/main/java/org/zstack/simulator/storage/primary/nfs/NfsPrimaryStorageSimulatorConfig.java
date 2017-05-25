@@ -4,7 +4,9 @@ import org.zstack.storage.primary.nfs.NfsPrimaryStorageKVMBackendCommands.*;
 import org.zstack.utils.data.SizeUnit;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class NfsPrimaryStorageSimulatorConfig {
     public volatile boolean createRootVolumeFromTemplateSuccess = true;
@@ -38,4 +40,19 @@ public class NfsPrimaryStorageSimulatorConfig {
     public volatile boolean moveBitsSuccess = true;
     public volatile boolean offlineMergeSnapshotSuccess = true;
     public volatile List<OfflineMergeSnapshotCmd> offlineMergeSnapshotCmds = new ArrayList<OfflineMergeSnapshotCmd>();
+    public volatile List<RemountCmd> remountCmds = new ArrayList<RemountCmd>();
+    public volatile boolean remountSuccess = true;
+
+    public Map<String, Long> mergeSnapshotCmdSize = new HashMap<String, Long>();
+    public Map<String, Long> mergeSnapshotCmdActualSize = new HashMap<String, Long>();
+    public Map<String, Long> rebaseAndMergeSnapshotsCmdSize = new HashMap<String, Long>();
+    public Map<String, Long> rebaseAndMergeSnapshotsCmdActualSize = new HashMap<String, Long>();
+    public List<GetVolumeActualSizeCmd> getVolumeSizeCmds = new ArrayList<GetVolumeActualSizeCmd>();
+    public Map<String, Long> getVolumeSizeCmdActualSize = new HashMap<String, Long>();
+    public Map<String, Long> getVolumeSizeCmdSize = new HashMap<String, Long>();
+    public volatile boolean pingSuccess = true;
+    public List<PingCmd> pingCmds = new ArrayList<PingCmd>();
+
+    public Map<String, String> getVolumeBaseImagePaths = new HashMap<String, String>();
+    public List<UpdateMountPointCmd> updateMountPointCmds = new ArrayList<>();
 }

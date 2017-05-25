@@ -32,7 +32,7 @@
                 <value>org.zstack.network.service.virtualrouter.dns.VirtualRouterSyncDnsOnStartFlow</value>
                 <value>org.zstack.network.service.virtualrouter.dhcp.VirtualRouterSyncDHCPOnStartFlow</value>
                 <value>org.zstack.network.service.virtualrouter.nat.VirtualRouterSyncSNATOnStartFlow</value>
-                <value>org.zstack.network.service.virtualrouter.vip.VirtualRouterSyncVipForNewCreateFlow</value>
+                <value>org.zstack.network.service.virtualrouter.vip.VirtualRouterSyncVipFlow</value>
                 <value>org.zstack.network.service.virtualrouter.portforwarding.VirtualRouterSyncPortForwardingRulesOnStartFlow</value>
                 <value>org.zstack.network.service.virtualrouter.eip.VirtualRouterSyncEipOnStartFlow</value>
                 <value>org.zstack.network.service.virtualrouter.lb.VirtualRouterSyncLbOnStartFlow</value>
@@ -100,6 +100,8 @@
             <zstack:extension interface="org.zstack.header.network.l2.L2NetworkCreateExtensionPoint" />
             <zstack:extension interface="org.zstack.header.apimediator.GlobalApiMessageInterceptor" />
             <zstack:extension interface="org.zstack.header.query.AddExpandedQueryExtensionPoint" />
+            <zstack:extension interface="org.zstack.network.service.eip.GetCandidateVmNicsForEipInVirtualRouterExtensionPoint" />
+            <zstack:extension interface="org.zstack.network.service.lb.GetCandidateVmNicsForLoadBalancerExtensionPoint"/>
         </zstack:plugin>
     </bean>
 
@@ -107,6 +109,7 @@
         <zstack:plugin>
             <zstack:extension interface="org.zstack.header.Component" />
             <zstack:extension interface="org.zstack.header.managementnode.ManagementNodeChangeListener" />
+            <zstack:extension interface="org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint" />
         </zstack:plugin>
     </bean>
 
@@ -188,6 +191,12 @@
     <bean id="VirtualRouterLoadBalancerBackend" class="org.zstack.network.service.virtualrouter.lb.VirtualRouterLoadBalancerBackend">
         <zstack:plugin>
             <zstack:extension interface="org.zstack.network.service.lb.LoadBalancerBackend" />
+        </zstack:plugin>
+    </bean>
+
+    <bean id="VirtualRouterVipFactory" class="org.zstack.network.service.virtualrouter.vip.VirtualRouterVipFactory">
+        <zstack:plugin>
+            <zstack:extension interface="org.zstack.network.service.vip.VipFactory" />
         </zstack:plugin>
     </bean>
 </beans>

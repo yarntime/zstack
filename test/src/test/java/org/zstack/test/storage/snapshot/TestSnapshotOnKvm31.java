@@ -16,14 +16,15 @@ import org.zstack.header.volume.VolumeStatus;
 import org.zstack.header.volume.VolumeType;
 import org.zstack.header.volume.VolumeVO;
 import org.zstack.simulator.kvm.VolumeSnapshotKvmSimulator;
+import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
@@ -66,7 +67,7 @@ public class TestSnapshotOnKvm31 {
         VolumeVO vol = dbf.findByUuid(inv.getVolumeUuid(), VolumeVO.class);
         VolumeSnapshotVO svo = dbf.findByUuid(inv.getUuid(), VolumeSnapshotVO.class);
         Assert.assertNotNull(svo);
-        Assert.assertTrue(svo.isFullSnapshot());
+        Assert.assertFalse(svo.isFullSnapshot());
         Assert.assertTrue(svo.isLatest());
         Assert.assertNull(svo.getParentUuid());
         Assert.assertEquals(distance, svo.getDistance());
@@ -95,8 +96,8 @@ public class TestSnapshotOnKvm31 {
         Assert.assertEquals(svo.getTreeUuid(), cvo.getUuid());
     }
 
-	@Test
-	public void test() throws ApiSenderException {
+    @Test
+    public void test() throws ApiSenderException {
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         VolumeInventory dataVol = CollectionUtils.find(vm.getAllVolumes(), new Function<VolumeInventory, VolumeInventory>() {
             @Override
@@ -127,13 +128,14 @@ public class TestSnapshotOnKvm31 {
         long count = q.count();
         Assert.assertEquals(4, count);
 
+        long size = SizeUnit.GIGABYTE.toByte(10);
+        nfsConfig.mergeSnapshotCmdSize.put(inv.getVolumeUuid(), size);
         VolumeInventory vol = api.createDataVolumeFromSnapshot(inv.getUuid());
         Assert.assertEquals(VolumeType.Data.toString(), vol.getType());
         Assert.assertNotNull(vol.getInstallPath());
         Assert.assertTrue(vol.getSize() != 0);
         Assert.assertEquals(VolumeStatus.Ready.toString(), inv.getStatus());
         Assert.assertFalse(nfsConfig.mergeSnapshotCmds.isEmpty());
-        Assert.assertFalse(nfsConfig.moveBitsCmds.isEmpty());
 
         snapshotKvmSimulator.validate(root);
     }

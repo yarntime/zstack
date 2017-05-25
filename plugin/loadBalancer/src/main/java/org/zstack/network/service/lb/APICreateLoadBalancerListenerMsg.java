@@ -1,8 +1,13 @@
 package org.zstack.network.service.lb;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APICreateMessage;
+import org.zstack.header.message.APIEvent;
+import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.tag.TagResourceType;
 
 /**
@@ -10,6 +15,12 @@ import org.zstack.header.tag.TagResourceType;
  */
 @TagResourceType(LoadBalancerListenerVO.class)
 @Action(category = LoadBalancerConstants.ACTION_CATEGORY)
+@RestRequest(
+        path = "/load-balancers/{loadBalancerUuid}/listeners",
+        method = HttpMethod.POST,
+        responseClass = APICreateLoadBalancerListenerEvent.class,
+        parameterName = "params"
+)
 public class APICreateLoadBalancerListenerMsg extends APICreateMessage implements LoadBalancerMessage {
     @APIParam(resourceType = LoadBalancerVO.class, checkAccount = true, operationTarget = true)
     private String loadBalancerUuid;
@@ -17,9 +28,9 @@ public class APICreateLoadBalancerListenerMsg extends APICreateMessage implement
     private String name;
     @APIParam(maxLength = 2048, required = false)
     private String description;
-    @APIParam(numberRange = {1, 65536}, required = false)
+    @APIParam(numberRange = {1, 65535}, required = false)
     private Integer instancePort;
-    @APIParam(numberRange = {1, 65536})
+    @APIParam(numberRange = {1, 65535})
     private int loadBalancerPort;
     @APIParam(maxLength = 255, validValues = {LoadBalancerConstants.LB_PROTOCOL_TCP, LoadBalancerConstants.LB_PROTOCOL_HTTP}, required = false)
     private String protocol;
@@ -71,5 +82,31 @@ public class APICreateLoadBalancerListenerMsg extends APICreateMessage implement
 
     public void setProtocol(String protocol) {
         this.protocol = protocol;
+    }
+ 
+    public static APICreateLoadBalancerListenerMsg __example__() {
+        APICreateLoadBalancerListenerMsg msg = new APICreateLoadBalancerListenerMsg();
+
+        msg.setLoadBalancerUuid(uuid());
+        msg.setName("Test-Listener");
+        msg.setLoadBalancerPort(80);
+        msg.setInstancePort(80);
+        msg.setProtocol(LoadBalancerConstants.LB_PROTOCOL_HTTP);
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Created").resource(((APICreateLoadBalancerListenerEvent)evt).getInventory().getUuid(),LoadBalancerListenerVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
     }
 }

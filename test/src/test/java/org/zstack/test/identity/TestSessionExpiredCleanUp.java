@@ -9,10 +9,7 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.identity.SessionVO;
 import org.zstack.identity.IdentityGlobalConfig;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 
 import java.util.concurrent.TimeUnit;
 
@@ -25,7 +22,7 @@ public class TestSessionExpiredCleanUp {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("AccountManager.xml").build();
         dbf = loader.getComponent(DatabaseFacade.class);
@@ -33,12 +30,12 @@ public class TestSessionExpiredCleanUp {
         api = new Api();
         api.startServer();
     }
-    
-    
+
+
     @Test
     public void test() throws ApiSenderException, InterruptedException {
         IdentityGlobalConfig.SESSION_TIMEOUT.updateValue(1);
-        IdentityGlobalConfig.SESSION_CELANUP_INTERVAL.updateValue(1);
+        IdentityGlobalConfig.SESSION_CLEANUP_INTERVAL.updateValue(1);
         SessionInventory session = api.loginAsAdmin();
         TimeUnit.SECONDS.sleep(5);
         SessionVO vo = dbf.findByUuid(session.getUserUuid(), SessionVO.class);

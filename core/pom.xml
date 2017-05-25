@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.zstack</groupId>
-        <version>0.9.0</version>
+        <version>2.0.0</version>
         <relativePath>..</relativePath>
         <artifactId>zstack</artifactId>
     </parent>
@@ -21,7 +21,11 @@
             <artifactId>header</artifactId>
             <version>${project.version}</version>
         </dependency>
-
+        <dependency>
+              <groupId>org.quartz-scheduler</groupId>
+              <artifactId>quartz</artifactId>
+              <version>2.2.3</version>
+        </dependency>
         <dependency>
             <groupId>javax.servlet</groupId>
             <artifactId>servlet-api</artifactId>
@@ -34,10 +38,6 @@
         <dependency>
             <groupId>org.ini4j</groupId>
             <artifactId>ini4j</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.mvel</groupId>
-            <artifactId>mvel2</artifactId>
         </dependency>
         <dependency>
             <groupId>cglib</groupId>
@@ -65,7 +65,7 @@
         </dependency>
         <dependency>
             <groupId>org.hibernate.javax.persistence</groupId>
-            <artifactId>hibernate-jpa-2.0-api</artifactId>
+   	    <artifactId>hibernate-jpa-2.1-api</artifactId>
         </dependency>
         <dependency>
             <groupId>org.hibernate</groupId>
@@ -77,7 +77,15 @@
         </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
             <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context-support</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
@@ -119,6 +127,14 @@
             <groupId>org.tuckey</groupId>
             <artifactId>urlrewritefilter</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.reflections</groupId>
+            <artifactId>reflections</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.uuid</groupId>
+            <artifactId>java-uuid-generator</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -147,6 +163,7 @@
                 </executions>
                 <configuration>
                     <source>${project.java.version}</source>
+                    <complianceLevel>${project.java.version}</complianceLevel>
                     <target>${project.java.version}</target>
                     <XnoInline>true</XnoInline>
                     <aspectLibraries>

@@ -8,6 +8,7 @@ import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.Message;
 import org.zstack.header.vm.*;
 import org.zstack.utils.message.OperationChecker;
+import static org.zstack.core.Platform.i18n;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public abstract class AbstractVmInstance implements VmInstance {
@@ -19,12 +20,16 @@ public abstract class AbstractVmInstance implements VmInstance {
 
     static {
         allowedOperations.addState(VmInstanceState.Created,
-                StartNewCreatedVmInstanceMsg.class.getName());
+                StartNewCreatedVmInstanceMsg.class.getName(),
+                APIStartVmInstanceMsg.class.getName(),
+                StartVmInstanceMsg.class.getName()
+        );
 
         allowedOperations.addState(VmInstanceState.Running,
                 APIStopVmInstanceMsg.class.getName(),
                 StopVmInstanceMsg.class.getName(),
                 APIRebootVmInstanceMsg.class.getName(),
+                RebootVmInstanceMsg.class.getName(),
                 APIDestroyVmInstanceMsg.class.getName(),
                 DestroyVmInstanceMsg.class.getName(),
                 APIMigrateVmMsg.class.getName(),
@@ -38,7 +43,12 @@ public abstract class AbstractVmInstance implements VmInstance {
                 APIChangeInstanceOfferingMsg.class.getName(),
                 APIGetVmMigrationCandidateHostsMsg.class.getName(),
                 APIDetachL3NetworkFromVmMsg.class.getName(),
-                DetachNicFromVmMsg.class.getName()
+                DetachNicFromVmMsg.class.getName(),
+                APIAttachIsoToVmInstanceMsg.class.getName(),
+                APIDetachIsoFromVmInstanceMsg.class.getName(),
+                APIGetVmConsoleAddressMsg.class.getName(),
+                APIDeleteVmStaticIpMsg.class.getName(),
+                APIPauseVmInstanceMsg.class.getName()
         );
 
         allowedOperations.addState(VmInstanceState.Stopped,
@@ -55,7 +65,14 @@ public abstract class AbstractVmInstance implements VmInstance {
                 APIChangeInstanceOfferingMsg.class.getName(),
                 StopVmInstanceMsg.class.getName(),
                 APIDetachL3NetworkFromVmMsg.class.getName(),
-                DetachNicFromVmMsg.class.getName()
+                DetachNicFromVmMsg.class.getName(),
+                APIAttachIsoToVmInstanceMsg.class.getName(),
+                APIDetachIsoFromVmInstanceMsg.class.getName(),
+                APISetVmStaticIpMsg.class.getName(),
+                APIDeleteVmStaticIpMsg.class.getName(),
+                StartVmInstanceMsg.class.getName(),
+                HaStartVmInstanceMsg.class.getName(),
+                APIGetVmStartingCandidateClustersHostsMsg.class.getName()
         );
 
         allowedOperations.addState(VmInstanceState.Unknown,
@@ -80,6 +97,43 @@ public abstract class AbstractVmInstance implements VmInstance {
                 APIDestroyVmInstanceMsg.class.getName(),
                 DestroyVmInstanceMsg.class.getName());
 
+        allowedOperations.addState(VmInstanceState.Destroyed,
+                ExpungeVmMsg.class.getName(),
+                APIExpungeVmInstanceMsg.class.getName(),
+                APIRecoverVmInstanceMsg.class.getName());
+
+        allowedOperations.addState(VmInstanceState.Paused,
+                APIResumeVmInstanceMsg.class.getName(),
+                APIStopVmInstanceMsg.class.getName(),
+                StopVmInstanceMsg.class.getName(),
+                APIDestroyVmInstanceMsg.class.getName(),
+                DestroyVmInstanceMsg.class.getName(),
+                APIMigrateVmMsg.class.getName(),
+                MigrateVmMsg.class.getName(),
+                AttachDataVolumeToVmMsg.class.getName(),
+                DetachDataVolumeFromVmMsg.class.getName(),
+                AttachNicToVmMsg.class.getName(),
+                VmAttachNicMsg.class.getName(),
+                APIAttachL3NetworkToVmMsg.class.getName(),
+                GetVmMigrationTargetHostMsg.class.getName(),
+                APIChangeInstanceOfferingMsg.class.getName(),
+                APIGetVmMigrationCandidateHostsMsg.class.getName(),
+                APIDetachL3NetworkFromVmMsg.class.getName(),
+                DetachNicFromVmMsg.class.getName(),
+                APIAttachIsoToVmInstanceMsg.class.getName(),
+                APIDetachIsoFromVmInstanceMsg.class.getName(),
+                APIGetVmConsoleAddressMsg.class.getName(),
+                APIDeleteVmStaticIpMsg.class.getName());
+
+        allowedOperations.addState(VmInstanceState.Pausing,
+                APIDestroyVmInstanceMsg.class.getName(),
+                DestroyVmInstanceMsg.class.getName());
+
+        allowedOperations.addState(VmInstanceState.Resuming,
+                APIDestroyVmInstanceMsg.class.getName(),
+                DestroyVmInstanceMsg.class.getName());
+
+
         stateChangeChecker.addState(VmInstanceStateEvent.unknown.toString(),
                 VmInstanceState.Created.toString(),
                 VmInstanceState.Stopped.toString(),
@@ -92,7 +146,7 @@ public abstract class AbstractVmInstance implements VmInstance {
         if (checker.isOperationAllowed(msg.getMessageName(), currentState.toString())) {
             return null;
         } else {
-            String details = String.format("current vm instance state[%s] doesn't allow to proceed message[%s], allowed states are %s", currentState,
+            String details = i18n("current vm instance state[%s] doesn't allow to proceed message[%s], allowed states are %s", currentState,
                     msg.getMessageName(), checker.getStatesForOperation(msg.getMessageName()));
             ErrorCode cause = errf.instantiateErrorCode(VmErrors.NOT_IN_CORRECT_STATE, details);
             if (errorCode != null) {

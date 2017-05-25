@@ -1,21 +1,22 @@
 package org.zstack.network.service.virtualrouter.eip;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.zstack.appliancevm.*;
+import org.zstack.appliancevm.ApplianceVmFacade;
+import org.zstack.appliancevm.ApplianceVmFirewallProtocol;
+import org.zstack.appliancevm.ApplianceVmFirewallRuleInventory;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.cloudbus.CloudBusCallBack;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.workflow.*;
+import org.zstack.core.timeout.ApiTimeoutManager;
+import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.header.core.Completion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.header.core.workflow.*;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.errorcode.OperationFailureException;
-import org.zstack.header.identity.AccountResourceRefVO;
-import org.zstack.header.identity.AccountResourceRefVO_;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.header.network.l3.L3NetworkVO;
@@ -36,13 +37,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static org.zstack.core.Platform.operr;
+
 /**
  */
-public class VirtualRouterEipBackend implements EipBackend {
+public class VirtualRouterEipBackend extends AbstractVirtualRouterBackend implements EipBackend {
     private static final CLogger logger = Utils.getLogger(VirtualRouterEipBackend.class);
 
-    @Autowired
-    protected VirtualRouterManager vrMgr;
     @Autowired
     protected DatabaseFacade dbf;
     @Autowired
@@ -51,6 +52,8 @@ public class VirtualRouterEipBackend implements EipBackend {
     protected ErrorFacade errf;
     @Autowired
     private ApplianceVmFacade asf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     private List<ApplianceVmFirewallRuleInventory> getFirewallRules(EipStruct struct) {
         ApplianceVmFirewallRuleInventory tcp = new ApplianceVmFirewallRuleInventory();
@@ -88,7 +91,7 @@ public class VirtualRouterEipBackend implements EipBackend {
             }
 
             @Override
-            public void rollback(final FlowTrigger trigger, Map data) {
+            public void rollback(final FlowRollback trigger, Map data) {
                 asf.removeFirewall(vr.getUuid(), struct.getVip().getL3NetworkUuid(), getFirewallRules(struct), new Completion(trigger) {
                     @Override
                     public void success() {
@@ -127,6 +130,7 @@ public class VirtualRouterEipBackend implements EipBackend {
                 msg.setCheckStatus(true);
                 msg.setPath(VirtualRouterConstant.VR_CREATE_EIP);
                 msg.setCommand(cmd);
+                msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
                 msg.setVmInstanceUuid(vr.getUuid());
                 bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
                 bus.send(msg, new CloudBusCallBack(completion) {
@@ -142,11 +146,9 @@ public class VirtualRouterEipBackend implements EipBackend {
                         if (ret.isSuccess()) {
                             trigger.next();
                         } else {
-                            trigger.fail(errf.stringToOperationError(
-                                    String.format("failed to create eip[uuid:%s, name:%s, ip:%s] for vm nic[uuid:%s] on virtual router[uuid:%s], %s",
+                            trigger.fail(operr("failed to create eip[uuid:%s, name:%s, ip:%s] for vm nic[uuid:%s] on virtual router[uuid:%s], %s",
                                             struct.getEip().getUuid(), struct.getEip().getName(), struct.getVip().getIp(), struct.getNic().getUuid(),
-                                            vr.getUuid(), ret.getError())
-                            ));
+                                            vr.getUuid(), ret.getError()));
                         }
                     }
                 });
@@ -174,20 +176,23 @@ public class VirtualRouterEipBackend implements EipBackend {
     public void applyEip(final EipStruct struct, final Completion completion) {
         L3NetworkVO l3vo = dbf.findByUuid(struct.getNic().getL3NetworkUuid(), L3NetworkVO.class);
         final L3NetworkInventory l3inv = L3NetworkInventory.valueOf(l3vo);
-        vrMgr.acquireVirtualRouterVm(l3inv, new VirtualRouterOfferingValidator() {
+
+        VirtualRouterStruct s = new VirtualRouterStruct();
+        s.setOfferingValidator(new VirtualRouterOfferingValidator() {
             @Override
             public void validate(VirtualRouterOfferingInventory offering) throws OperationFailureException {
                 if (!offering.getPublicNetworkUuid().equals(struct.getVip().getL3NetworkUuid())) {
-                    throw new OperationFailureException(errf.stringToOperationError(
-                            String.format("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to EIP[uuid:%s]'s; you may need to use system tag" +
-                                    " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), l3inv.getUuid(), l3inv.getZoneUuid(), struct.getVip().getL3NetworkUuid(), struct.getEip().getUuid())
-                    ));
+                    throw new OperationFailureException(operr("found a virtual router offering[uuid:%s] for L3Network[uuid:%s] in zone[uuid:%s]; however, the network's public network[uuid:%s] is not the same to EIP[uuid:%s]'s; you may need to use system tag" +
+                                    " guestL3Network::l3NetworkUuid to specify a particular virtual router offering for the L3Network", offering.getUuid(), l3inv.getUuid(), l3inv.getZoneUuid(), struct.getVip().getL3NetworkUuid(), struct.getEip().getUuid()));
                 }
             }
-        }, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
+        });
+        s.setL3Network(l3inv);
+
+        acquireVirtualRouterVm(s, new ReturnValueCompletion<VirtualRouterVmInventory>(completion) {
             @Override
             public void success(final VirtualRouterVmInventory vr) {
-                applyEip(vr, struct, new Completion() {
+                applyEip(vr, struct, new Completion(completion) {
                     @Override
                     public void success() {
                         SimpleQuery<VirtualRouterEipRefVO> q = dbf.createQuery(VirtualRouterEipRefVO.class);
@@ -232,13 +237,14 @@ public class VirtualRouterEipBackend implements EipBackend {
         VirtualRouterVmVO vrvo = dbf.findByUuid(ref.getVirtualRouterVmUuid(), VirtualRouterVmVO.class);
         if (vrvo.getState() != VmInstanceState.Running) {
             // rule will be synced when vr state changes to Running
+            dbf.remove(ref);
             completion.success();
             return;
         }
 
         final VirtualRouterVmInventory vr = VirtualRouterVmInventory.valueOf(vrvo);
 
-        //TODO: how to cleanup on failure
+        //TODO: add GC
         final FlowChain chain = FlowChainBuilder.newSimpleFlowChain();
         chain.setName(String.format("revoke-eip-%s-vr-%s", struct.getEip().getUuid(), vr.getUuid()));
         chain.then(new NoRollbackFlow() {
@@ -265,6 +271,7 @@ public class VirtualRouterEipBackend implements EipBackend {
                 VirtualRouterAsyncHttpCallMsg msg = new VirtualRouterAsyncHttpCallMsg();
                 msg.setVmInstanceUuid(vr.getUuid());
                 msg.setCommand(cmd);
+                msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
                 msg.setCheckStatus(true);
                 msg.setPath(VirtualRouterConstant.VR_REMOVE_EIP);
                 bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
@@ -277,10 +284,10 @@ public class VirtualRouterEipBackend implements EipBackend {
                             VirtualRouterAsyncHttpCallReply re = reply.castReply();
                             RemoveEipRsp ret = re.toResponse(RemoveEipRsp.class);
                             if (!ret.isSuccess()) {
-                                String err = String.format("failed to remove eip[uuid:%s, name:%s, ip:%s] for vm nic[uuid:%s] on virtual router[uuid:%s], %s",
+                                ErrorCode err = operr("failed to remove eip[uuid:%s, name:%s, ip:%s] for vm nic[uuid:%s] on virtual router[uuid:%s], %s",
                                         struct.getEip().getUuid(), struct.getEip().getName(), struct.getVip().getIp(), struct.getNic().getUuid(),
                                         vr.getUuid(), ret.getError());
-                                trigger.setError(errf.stringToOperationError(err));
+                                trigger.setError(err);
                             }
                         }
 
@@ -291,7 +298,7 @@ public class VirtualRouterEipBackend implements EipBackend {
         }).then(new NoRollbackFlow() {
             @Override
             public void run(final FlowTrigger trigger, Map data) {
-                asf.removeFirewall(vr.getUuid(), struct.getVip().getL3NetworkUuid(), getFirewallRules(struct), new Completion() {
+                asf.removeFirewall(vr.getUuid(), struct.getVip().getL3NetworkUuid(), getFirewallRules(struct), new Completion(trigger) {
                     @Override
                     public void success() {
                         trigger.next();
@@ -318,6 +325,9 @@ public class VirtualRouterEipBackend implements EipBackend {
         }).error(new FlowErrorHandler(completion) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
+                // We need to remove the 'ref' record, otherwise the next time when
+                // deleting EIP is requested, we will get ConstraintViolationException.
+                dbf.remove(ref);
                 completion.fail(errCode);
             }
         }).start();

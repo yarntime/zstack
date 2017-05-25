@@ -1,39 +1,95 @@
 package org.zstack.core.thread;
 
+import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Configurable;
+import org.zstack.core.debug.DebugManager;
+import org.zstack.core.debug.DebugSignal;
+import org.zstack.core.debug.DebugSignalHandler;
+import org.zstack.header.core.AsyncBackup;
+import org.zstack.header.errorcode.OperationFailureException;
+import org.zstack.header.message.Message;
 import org.zstack.utils.DebugUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 import org.zstack.utils.logging.CLoggerImpl;
 
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Configurable(preConstruction = true, autowire = Autowire.BY_TYPE, dependencyCheck = true)
-class DispatchQueueImpl implements DispatchQueue {
+class DispatchQueueImpl implements DispatchQueue, DebugSignalHandler {
     private static final CLogger logger = Utils.getLogger(DispatchQueueImpl.class);
 
-	@Autowired
-	ThreadFacade _threadFacade;
+    @Autowired
+    ThreadFacade _threadFacade;
 
-	private final HashMap<String, SyncTaskQueueWrapper> syncTasks = new HashMap<String, SyncTaskQueueWrapper>();
-	private final HashMap<String, ChainTaskQueueWrapper> chainTasks = new HashMap<String, ChainTaskQueueWrapper>();
-	private static final CLogger _logger = CLoggerImpl.getLogger(DispatchQueueImpl.class);
+    private final HashMap<String, SyncTaskQueueWrapper> syncTasks = new HashMap<String, SyncTaskQueueWrapper>();
+    private final HashMap<String, ChainTaskQueueWrapper> chainTasks = new HashMap<String, ChainTaskQueueWrapper>();
+    private static final CLogger _logger = CLoggerImpl.getLogger(DispatchQueueImpl.class);
 
+    @Override
+    public void handleDebugSignal(DebugSignal sig) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n================= BEGIN TASK QUEUE DUMP ================");
+        sb.append("\nASYNC TASK QUEUE DUMP:");
+        sb.append(String.format("\nTASK QUEUE NUMBER: %s\n", chainTasks.size()));
+        List<String> asyncTasks = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, ChainTaskQueueWrapper> e : chainTasks.entrySet()) {
+            StringBuilder tb = new StringBuilder(String.format("\nQUEUE SYNC SIGNATURE: %s", e.getKey()));
+            ChainTaskQueueWrapper w = e.getValue();
+            tb.append(String.format("\nRUNNING TASK NUMBER: %s", w.runningQueue.size()));
+            tb.append(String.format("\nPENDING TASK NUMBER: %s", w.pendingQueue.size()));
+            int index = 0;
+            for (Object obj : w.runningQueue) {
+                ChainFuture cf = (ChainFuture) obj;
+                tb.append(String.format("\nRUNNING TASK[NAME: %s, CLASS: %s EXECUTION TIME: %s secs, INDEX: %s] %s",
+                        cf.getTask().getName(), cf.getTask().getClass(),
+                        TimeUnit.MILLISECONDS.toSeconds(now - cf.getTimestamp()), index++,
+                        getChainContext(cf.getTask())
+                ));
+            }
 
-	public void init() {
-	}
+            for (Object obj : w.pendingQueue) {
+                ChainFuture cf = (ChainFuture) obj;
+                tb.append(String.format("\nPENDING TASK[NAME: %s, CLASS: %s EXECUTION TIME: %s secs, INDEX: %s] %s",
+                        cf.getTask().getName(), cf.getTask().getClass(),
+                        TimeUnit.MILLISECONDS.toSeconds(now - cf.getTimestamp()), index++,
+                        getChainContext(cf.getTask())
+                ));
+            }
+            asyncTasks.add(tb.toString());
+        }
+        sb.append(StringUtils.join(asyncTasks, "\n"));
+        sb.append("\n================= END TASK QUEUE DUMP ==================\n");
+        logger.debug(sb.toString());
+    }
 
-	public void destroy() {
-	}
+    private String getChainContext(ChainTask task) {
+        List<String> context = new ArrayList<>();
+        for (AsyncBackup backup : task.getBackups()) {
+            if (backup instanceof Message) {
+                context.add(JSONObjectUtil.toJsonString(backup));
+            }
+        }
+
+        if (!context.isEmpty()) {
+            return String.format("CONTEXT: %s", StringUtils.join(context, "\n"));
+        }
+
+        return "";
+    }
+
+    public DispatchQueueImpl() {
+        DebugManager.registerDebugSignalHandler(DebugSignal.DumpTaskQueue, this);
+    }
 
     private class SyncTaskFuture<T> extends AbstractFuture<T> {
         public SyncTaskFuture(SyncTask<T> task) {
@@ -41,7 +97,7 @@ class DispatchQueueImpl implements DispatchQueue {
         }
 
         private SyncTask getTask() {
-            return (SyncTask)task;
+            return (SyncTask) task;
         }
 
         @Override
@@ -136,8 +192,8 @@ class DispatchQueueImpl implements DispatchQueue {
         }
     }
 
-	private <T> Future<T> doSyncSubmit(final SyncTask<T> syncTask) {
-		assert syncTask.getSyncSignature() != null : "How can you submit a sync task without sync signature ???";
+    private <T> Future<T> doSyncSubmit(final SyncTask<T> syncTask) {
+        assert syncTask.getSyncSignature() != null : "How can you submit a sync task without sync signature ???";
 
         SyncTaskFuture f;
         synchronized (syncTasks) {
@@ -151,28 +207,35 @@ class DispatchQueueImpl implements DispatchQueue {
             wrapper.startThreadIfNeeded();
         }
 
-		return f;
-	}
+        return f;
+    }
 
-	@Override
-	public <T> Future<T> syncSubmit(SyncTask<T> task) {
-		if (task.getSyncLevel() <= 0) {
-			return _threadFacade.submit(task);
-		} else {
-			return doSyncSubmit(task);
-		}
-	}
+    @Override
+    public <T> Future<T> syncSubmit(SyncTask<T> task) {
+        if (task.getSyncLevel() <= 0) {
+            return _threadFacade.submit(task);
+        } else {
+            return doSyncSubmit(task);
+        }
+    }
 
 
-    class ChainFuture extends  AbstractFuture {
+    class ChainFuture extends AbstractFuture {
         private AtomicBoolean isNextCalled = new AtomicBoolean(false);
+        // in running queue: means execution time
+        // in pending queue: means pending time
+        private long timestamp = System.currentTimeMillis();
+
+        public long getTimestamp() {
+            return timestamp;
+        }
 
         public ChainFuture(ChainTask task) {
             super(task);
         }
 
         private ChainTask getTask() {
-            return (ChainTask)task;
+            return (ChainTask) task;
         }
 
         @Override
@@ -208,7 +271,10 @@ class DispatchQueueImpl implements DispatchQueue {
                 });
             } catch (Throwable t) {
                 try {
-                    _logger.warn(String.format("unhandled exception happened when calling %s", task.getClass().getName()), t);
+                    if (!(t instanceof OperationFailureException)) {
+                        _logger.warn(String.format("unhandled exception happened when calling %s", task.getClass().getName()), t);
+                    }
+
                     done();
                 } finally {
                     callNext(chain);
@@ -226,13 +292,15 @@ class DispatchQueueImpl implements DispatchQueue {
     }
 
     private class ChainTaskQueueWrapper {
-        LinkedList queue = new LinkedList();
+        LinkedList pendingQueue = new LinkedList();
+        final LinkedList runningQueue = new LinkedList();
         AtomicInteger counter = new AtomicInteger(0);
         int maxThreadNum = -1;
         String syncSignature;
 
         void addTask(ChainFuture task) {
-            queue.offer(task);
+            pendingQueue.offer(task);
+
             if (maxThreadNum == -1) {
                 maxThreadNum = task.getSyncLevel();
             }
@@ -258,7 +326,9 @@ class DispatchQueueImpl implements DispatchQueue {
                 private void runQueue() {
                     ChainFuture cf;
                     synchronized (chainTasks) {
-                        cf = (ChainFuture) queue.poll();
+                        // remove from pending queue and add to running queue later
+                        cf = (ChainFuture) pendingQueue.poll();
+
                         if (cf == null) {
                             if (counter.decrementAndGet() == 0) {
                                 chainTasks.remove(syncSignature);
@@ -268,9 +338,18 @@ class DispatchQueueImpl implements DispatchQueue {
                         }
                     }
 
+                    synchronized (runningQueue) {
+                        // add to running queue
+                        runningQueue.offer(cf);
+                    }
+
                     cf.run(new SyncTaskChain() {
                         @Override
                         public void next() {
+                            synchronized (runningQueue) {
+                                runningQueue.remove(cf);
+                            }
+
                             runQueue();
                         }
                     });
@@ -286,9 +365,9 @@ class DispatchQueueImpl implements DispatchQueue {
     }
 
 
-	private <T> Future<T> doChainSyncSubmit(final ChainTask task) {
+    private <T> Future<T> doChainSyncSubmit(final ChainTask task) {
         assert task.getSyncSignature() != null : "How can you submit a chain task without sync signature ???";
-        DebugUtils.Assert(task.getSyncLevel() >= 1, String.format("getSyncLevel() must return more than 1"));
+        DebugUtils.Assert(task.getSyncLevel() >= 1, String.format("getSyncLevel() must return 1 at least "));
 
         synchronized (chainTasks) {
             final String signature = task.getSyncSignature();
@@ -304,7 +383,7 @@ class DispatchQueueImpl implements DispatchQueue {
             return cf;
         }
     }
-	
+
 
     @Override
     public Future<Void> chainSubmit(ChainTask task) {
@@ -337,7 +416,7 @@ class DispatchQueueImpl implements DispatchQueue {
                     wrapper.syncSignature,
                     wrapper.maxThreadNum,
                     wrapper.counter.intValue(),
-                    wrapper.queue.size()
+                    wrapper.pendingQueue.size()
             );
             ret.put(statistic.getSyncSignature(), statistic);
         }

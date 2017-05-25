@@ -2,7 +2,8 @@ package org.zstack.header.image;
 
 public enum ImageStatus {
     Creating,
-	Downloading,
+    Downloading,
     Ready,
-	Error,
+    Error,
+    Deleted,
 }

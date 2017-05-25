@@ -1,26 +1,23 @@
 package org.zstack.header.configuration;
 
 import org.zstack.header.vo.Index;
+import org.zstack.header.vo.ResourceVO;
 
 import javax.persistence.*;
 import java.sql.Timestamp;
 
 @MappedSuperclass
-public class DiskOfferingAO {
-    @Id
-    @Column
-    private String uuid;
-    
+public class DiskOfferingAO extends ResourceVO {
     @Column
     @Index
     private String name;
-    
+
     @Column
     private String description;
-    
+
     @Column
     private long diskSize;
-    
+
     @Column
     private int sortKey;
 
@@ -33,59 +30,56 @@ public class DiskOfferingAO {
 
     @Column
     private Timestamp createDate;
-    
+
     @Column
     private Timestamp lastOpDate;
-    
+
     @Column
     private String allocatorStrategy;
-    
-	public String getUuid() {
-    	return uuid;
+
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
     }
 
-	public void setUuid(String uuid) {
-    	this.uuid = uuid;
-	}
-
-	public long getDiskSize() {
-    	return diskSize;
+    public long getDiskSize() {
+        return diskSize;
     }
 
-	public void setDiskSize(long diskSize) {
-    	this.diskSize = diskSize;
+    public void setDiskSize(long diskSize) {
+        this.diskSize = diskSize;
     }
 
-	public String getName() {
-    	return name;
+    public String getName() {
+        return name;
     }
 
-	public void setName(String name) {
-    	this.name = name;
+    public void setName(String name) {
+        this.name = name;
     }
 
-	public String getDescription() {
-    	return description;
+    public String getDescription() {
+        return description;
     }
 
-	public void setDescription(String description) {
-    	this.description = description;
+    public void setDescription(String description) {
+        this.description = description;
     }
 
-	public int getSortKey() {
-    	return sortKey;
+    public int getSortKey() {
+        return sortKey;
     }
 
-	public void setSortKey(int sortKey) {
-    	this.sortKey = sortKey;
+    public void setSortKey(int sortKey) {
+        this.sortKey = sortKey;
     }
 
-	public String getAllocatorStrategy() {
-    	return allocatorStrategy;
+    public String getAllocatorStrategy() {
+        return allocatorStrategy;
     }
 
-	public void setAllocatorStrategy(String allocatorStrategy) {
-    	this.allocatorStrategy = allocatorStrategy;
+    public void setAllocatorStrategy(String allocatorStrategy) {
+        this.allocatorStrategy = allocatorStrategy;
     }
 
     public Timestamp getCreateDate() {

@@ -117,6 +117,7 @@ public class VirtualRouterCommands {
         private String vrNicMac;
         private String dnsDomain;
         private boolean isDefaultL3Network;
+		private Integer mtu;
 
         public String getDnsDomain() {
             return dnsDomain;
@@ -178,6 +179,13 @@ public class VirtualRouterCommands {
 		public void setHostname(String hostname) {
 			this.hostname = hostname;
 		}
+		public Integer getMtu() {
+			return mtu;
+		}
+		public void setMtu(Integer mtu) {
+			this.mtu = mtu;
+		}
+
 	}
 	
 	public static class RemoveDhcpEntryCmd extends AgentCommand {
@@ -349,6 +357,15 @@ public class VirtualRouterCommands {
 	
 	public static class DnsInfo {
 		private String dnsAddress;
+		private String nicMac;
+
+		public String getNicMac() {
+			return nicMac;
+		}
+
+		public void setNicMac(String nicMac) {
+			this.nicMac = nicMac;
+		}
 
 		public String getDnsAddress() {
 			return dnsAddress;

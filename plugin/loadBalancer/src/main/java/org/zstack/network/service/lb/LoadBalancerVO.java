@@ -1,8 +1,8 @@
 package org.zstack.network.service.lb;
 
-import org.zstack.header.tag.AutoDeleteTag;
 import org.zstack.header.vo.ForeignKey;
 import org.zstack.header.vo.NoView;
+import org.zstack.header.vo.ResourceVO;
 import org.zstack.network.service.vip.VipVO;
 
 import javax.persistence.*;
@@ -15,12 +15,7 @@ import java.util.Set;
  */
 @Entity
 @Table
-@AutoDeleteTag
-public class LoadBalancerVO {
-    @Id
-    @Column
-    private String uuid;
-
+public class LoadBalancerVO extends ResourceVO {
     @Column
     private String name;
 
@@ -49,6 +44,11 @@ public class LoadBalancerVO {
     @Column
     private Timestamp lastOpDate;
 
+    @PreUpdate
+    private void preUpdate() {
+        lastOpDate = null;
+    }
+
     public Set<LoadBalancerListenerVO> getListeners() {
         return listeners;
     }
@@ -63,14 +63,6 @@ public class LoadBalancerVO {
 
     public void setListeners(Set<LoadBalancerListenerVO> listeners) {
         this.listeners = listeners;
-    }
-
-    public String getUuid() {
-        return uuid;
-    }
-
-    public void setUuid(String uuid) {
-        this.uuid = uuid;
     }
 
     public String getName() {
@@ -120,14 +112,4 @@ public class LoadBalancerVO {
     public void setLastOpDate(Timestamp lastOpDate) {
         this.lastOpDate = lastOpDate;
     }
-
-    /*
-    public Set<LoadBalancerListenerVmNicRefVO> getVmNicRefs() {
-        return vmNicRefs;
-    }
-
-    public void setVmNicRefs(Set<LoadBalancerListenerVmNicRefVO> vmNicRefs) {
-        this.vmNicRefs = vmNicRefs;
-    }
-    */
 }

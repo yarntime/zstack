@@ -112,7 +112,7 @@ public class LoadBalancerExtension extends AbstractNetworkServiceExtension imple
                 }
 
                 @Override
-                public void rollback(final FlowTrigger trigger, Map data) {
+                public void rollback(final FlowRollback trigger, Map data) {
                     if (!s) {
                         LoadBalancerDeactiveVmNicMsg dmsg = new LoadBalancerDeactiveVmNicMsg();
                         dmsg.setLoadBalancerUuid(msg.getLoadBalancerUuid());
@@ -123,7 +123,7 @@ public class LoadBalancerExtension extends AbstractNetworkServiceExtension imple
                             @Override
                             public void run(MessageReply reply) {
                                 if (!reply.isSuccess()) {
-                                    //TODO: clean up
+                                    //TODO: add GC
                                     logger.warn(String.format("failed to deactive vm nics[uuids: %s] on the load balancer[uuid:%s]", msg.getVmNicUuids(), msg.getLoadBalancerUuid()));
                                 }
                             }
@@ -234,8 +234,8 @@ public class LoadBalancerExtension extends AbstractNetworkServiceExtension imple
             return;
         }
 
-        DeleteLoadBalancerMsg msg = new DeleteLoadBalancerMsg();
-        msg.setUuid(lbUuid);
+        DeleteLoadBalancerOnlyMsg msg = new DeleteLoadBalancerOnlyMsg();
+        msg.setLoadBalancerUuid(lbUuid);
         bus.makeTargetServiceIdByResourceUuid(msg, LoadBalancerConstants.SERVICE_ID, lbUuid);
         bus.send(msg, new CloudBusCallBack(completion) {
             @Override

@@ -9,6 +9,15 @@ public class ManagementNodeExitMsg extends Message {
     }
 
     private Reason reason = Reason.Normal;
+    private String details;
+
+    public String getDetails() {
+        return details;
+    }
+
+    public void setDetails(String details) {
+        this.details = details;
+    }
 
     public Reason getReason() {
         return reason;
@@ -19,5 +28,5 @@ public class ManagementNodeExitMsg extends Message {
     }
 
     public ManagementNodeExitMsg() {
-	}
+    }
 }

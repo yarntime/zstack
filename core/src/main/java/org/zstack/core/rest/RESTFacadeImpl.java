@@ -3,33 +3,44 @@ package org.zstack.core.rest;
 import org.apache.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.zstack.core.CoreGlobalProperty;
+import org.zstack.core.MessageCommandRecorder;
 import org.zstack.core.Platform;
 import org.zstack.core.errorcode.ErrorFacade;
-import org.zstack.core.thread.ThreadFacadeImpl.TimeoutTaskReceipt;
-import org.zstack.header.errorcode.SysErrors;
+import org.zstack.core.retry.Retry;
+import org.zstack.core.retry.RetryCondition;
 import org.zstack.core.thread.AsyncThread;
 import org.zstack.core.thread.CancelablePeriodicTask;
 import org.zstack.core.thread.ThreadFacade;
+import org.zstack.core.thread.ThreadFacadeImpl.TimeoutTaskReceipt;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.core.validation.ValidationFacade;
 import org.zstack.header.core.Completion;
 import org.zstack.header.errorcode.ErrorCode;
+import org.zstack.header.errorcode.OperationFailureException;
+import org.zstack.header.errorcode.SysErrors;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.rest.*;
 import org.zstack.utils.DebugUtils;
+import org.zstack.utils.ExceptionDSL;
 import org.zstack.utils.IptablesUtils;
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
 
+import static org.zstack.core.Platform.operr;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import java.util.Collections;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Enumeration;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +54,8 @@ public class RESTFacadeImpl implements RESTFacade {
     @Autowired
     private ErrorFacade errf;
     @Autowired
+    private ApiTimeoutManager timeoutMgr;
+    @Autowired
     private ValidationFacade vf;
 
     private String hostname;
@@ -50,13 +63,23 @@ public class RESTFacadeImpl implements RESTFacade {
     private String path;
     private String callbackUrl;
     private RestTemplate template;
+    private String baseUrl;
+    private String sendCommandUrl;
 
     private Map<String, HttpCallStatistic> statistics = new ConcurrentHashMap<String, HttpCallStatistic>();
+    private Map<String, HttpCallHandlerWrapper> httpCallhandlers = new ConcurrentHashMap<String, HttpCallHandlerWrapper>();
+    private List<BeforeAsyncJsonPostInterceptor> interceptors = new ArrayList<BeforeAsyncJsonPostInterceptor>();
 
     private interface AsyncHttpWrapper {
         void fail(ErrorCode err);
 
         void success(HttpEntity<String> responseEntity);
+    }
+
+    private interface HttpCallHandlerWrapper {
+        String handle(HttpEntity<String> entity);
+
+        HttpCallHandler getHandler();
     }
 
     private Map<String, AsyncHttpWrapper> wrappers = new ConcurrentHashMap<String, AsyncHttpWrapper>();
@@ -78,11 +101,18 @@ public class RESTFacadeImpl implements RESTFacade {
             url = String.format("http://%s:%s/%s", hname, port, path);
         }
         UriComponentsBuilder ub = UriComponentsBuilder.fromHttpUrl(url);
-        ub.path(RESTConstant.BASE_PATH);
         ub.path(RESTConstant.CALLBACK_PATH);
         callbackUrl = ub.build().toUriString();
+
+        ub = UriComponentsBuilder.fromHttpUrl(url);
+        baseUrl = ub.build().toUriString();
+
+        ub = UriComponentsBuilder.fromHttpUrl(url);
+        ub.path(RESTConstant.COMMAND_CHANNEL_PATH);
+        sendCommandUrl = ub.build().toUriString();
+
         logger.debug(String.format("RESTFacade built callback url: %s", callbackUrl));
-        template = new RestTemplate();
+        template = RESTFacade.createRestTemplate(CoreGlobalProperty.REST_FACADE_READ_TIMEOUT, CoreGlobalProperty.REST_FACADE_CONNECT_TIMEOUT);
     }
 
     void notifyCallback(HttpServletRequest req, HttpServletResponse rsp) {
@@ -90,7 +120,7 @@ public class RESTFacadeImpl implements RESTFacade {
         try {
             HttpEntity<String> entity = this.httpServletRequestToHttpEntity(req);
             if (taskUuid == null) {
-                rsp.sendError(HttpStatus.SC_NOT_FOUND, "No 'taskUuid' found in header");
+                rsp.sendError(HttpStatus.SC_BAD_REQUEST, "No 'taskUuid' found in the header");
                 logger.warn(String.format("Received a callback request, but no 'taskUuid' found in headers. request body: %s", entity.getBody()));
                 return;
             }
@@ -104,10 +134,52 @@ public class RESTFacadeImpl implements RESTFacade {
 
             rsp.setStatus(HttpStatus.SC_OK);
             wrapper.success(entity);
-        } catch (Exception e) {
+        } catch (IOException e) {
             logger.warn(e.getMessage(), e);
+        } catch (Throwable t) {
+            try {
+                rsp.sendError(HttpStatus.SC_INTERNAL_SERVER_ERROR, t.getMessage());
+            } catch (IOException e) {
+                logger.warn(e.getMessage(), e);
+            }
         }
     }
+
+    void sendCommand(HttpServletRequest req, HttpServletResponse rsp) {
+        String commandPath = req.getHeader(RESTConstant.COMMAND_PATH);
+        try {
+            HttpEntity<String> entity = this.httpServletRequestToHttpEntity(req);
+            if (commandPath == null) {
+                rsp.sendError(HttpStatus.SC_BAD_REQUEST, "No 'commandPath' found in the header");
+                logger.warn(String.format("Received a command, but no 'taskUuid' found in headers. request body: %s", entity.getBody()));
+                return;
+            }
+
+            HttpCallHandlerWrapper handler = httpCallhandlers.get(commandPath);
+            if (handler == null) {
+                rsp.sendError(HttpStatus.SC_NOT_FOUND, String.format("no handler found for the command path[%s]", commandPath));
+                logger.warn(String.format("Received a command, but no handler found for the path[%s]. request body: %s", commandPath, entity.getBody()));
+                return;
+            }
+
+            String ret = handler.handle(entity);
+            if (ret == null) {
+                rsp.setStatus(HttpStatus.SC_OK);
+            } else {
+                rsp.setStatus(HttpStatus.SC_OK, ret);
+            }
+        } catch (IOException e) {
+            logger.warn(e.getMessage(), e);
+        } catch (Throwable t) {
+            logger.warn(t.getMessage(), t);
+            try {
+                rsp.sendError(HttpStatus.SC_INTERNAL_SERVER_ERROR, t.getMessage());
+            } catch (IOException e) {
+                logger.warn(e.getMessage(), e);
+            }
+        }
+    }
+
 
     public void setHostname(String hostname) {
         this.hostname = hostname;
@@ -122,13 +194,33 @@ public class RESTFacadeImpl implements RESTFacade {
     }
 
     @Override
-    public void asyncJsonPost(String url, Object body, AsyncRESTCallback callback, TimeUnit unit, long timeout) {
+    public void asyncJsonPost(String url, Object body, Map<String, String> headers, AsyncRESTCallback callback, TimeUnit unit, long timeout) {
+        for (BeforeAsyncJsonPostInterceptor ic : interceptors) {
+            ic.beforeAsyncJsonPost(url, body, unit, timeout);
+        }
+
+        // for unit test finding invocation chain
+        MessageCommandRecorder.record(body.getClass());
         String bodyStr = JSONObjectUtil.toJsonString(body);
-        asyncJsonPost(url, bodyStr, callback, unit, timeout);
+        asyncJsonPost(url, bodyStr, headers, callback, unit, timeout);
+    }
+
+    @Override
+    public void asyncJsonPost(String url, Object body, AsyncRESTCallback callback, TimeUnit unit, long timeout) {
+        asyncJsonPost(url, body, null, callback, unit, timeout);
     }
 
     @Override
     public void asyncJsonPost(final String url, final String body, final AsyncRESTCallback callback, final TimeUnit unit, final long timeout) {
+        asyncJsonPost(url, body, null, callback, unit, timeout);
+    }
+
+    @Override
+    public void asyncJsonPost(final String url, final String body, Map<String, String> headers, final AsyncRESTCallback callback, final TimeUnit unit, final long timeout) {
+        for (BeforeAsyncJsonPostInterceptor ic : interceptors) {
+            ic.beforeAsyncJsonPost(url, body, unit, timeout);
+        }
+
         long stime = 0;
         if (CoreGlobalProperty.PROFILER_HTTP_CALL) {
             stime = System.currentTimeMillis();
@@ -189,7 +281,15 @@ public class RESTFacadeImpl implements RESTFacade {
                 cancelTimeout();
 
                 if (logger.isTraceEnabled()) {
-                    logger.trace(String.format("[http response(url: %s)] %s", url, responseEntity.getBody()));
+                    List<String> hs = responseEntity.getHeaders().get(RESTConstant.TASK_UUID);
+                    String taskUuid = hs == null || hs.isEmpty() ? null : hs.get(0);
+
+                    if (taskUuid == null) {
+                        logger.trace(String.format("[http response(url: %s)] %s", url, responseEntity.getBody()));
+                    } else {
+                        logger.trace(String.format("[http response(url: %s, taskUuid: %s)] %s",
+                                url, taskUuid, responseEntity.getBody()));
+                    }
                 }
 
                 if (callback instanceof JsonAsyncRESTCallback) {
@@ -220,38 +320,71 @@ public class RESTFacadeImpl implements RESTFacade {
             requestHeaders.setContentLength(body.length());
             requestHeaders.set(RESTConstant.TASK_UUID, taskUuid);
             requestHeaders.set(RESTConstant.CALLBACK_URL, callbackUrl);
+
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    requestHeaders.set(e.getKey(), e.getValue());
+                }
+            }
+
             HttpEntity<String> req = new HttpEntity<String>(body, requestHeaders);
             if (logger.isTraceEnabled()) {
                 logger.trace(String.format("json post[%s], %s", url, req.toString()));
             }
-            ResponseEntity<String> rsp = template.exchange(url, HttpMethod.POST, req, String.class);
+
+            ResponseEntity<String> rsp;
+
+            try {
+                if (CoreGlobalProperty.UNIT_TEST_ON) {
+                    rsp = template.exchange(url, HttpMethod.POST, req, String.class);
+                } else {
+                    rsp = new Retry<ResponseEntity<String>>() {
+                        @Override
+                        @RetryCondition(onExceptions = {IOException.class, RestClientException.class, HttpClientErrorException.class})
+                        protected ResponseEntity<String> call() {
+                            return template.exchange(url, HttpMethod.POST, req, String.class);
+                        }
+                    }.run();
+                }
+            } catch (HttpClientErrorException e) {
+                String err = String.format("http status: %s, response body:%s", e.getStatusCode(), e.getResponseBodyAsString());
+                wrapper.fail(errf.instantiateErrorCode(SysErrors.HTTP_ERROR, err));
+                return;
+            }
+
             if (rsp.getStatusCode() != org.springframework.http.HttpStatus.OK) {
                 String err = String.format("http status: %s, response body:%s", rsp.getStatusCode().toString(), rsp.getBody());
                 logger.warn(err);
-                wrapper.fail(errf.stringToOperationError(err));
+                wrapper.fail(errf.instantiateErrorCode(SysErrors.HTTP_ERROR, err));
             }
         } catch (Throwable e) {
             logger.warn(String.format("Unable to post to %s", url), e);
-            wrapper.fail(errf.throwableToInternalError(e));
+            wrapper.fail(ExceptionDSL.isCausedBy(e, IOException.class) ? errf.instantiateErrorCode(SysErrors.IO_ERROR, e.getMessage()) : errf.throwableToInternalError(e));
         }
     }
 
     @Override
+    public void asyncJsonPost(String url, Object body, Map<String, String> headers, AsyncRESTCallback callback) {
+        Long timeout = timeoutMgr.getTimeout(body.getClass());
+        asyncJsonPost(url, body, headers, callback, TimeUnit.MILLISECONDS, timeout == null ? 300000 : timeout);
+    }
+
+    @Override
     public void asyncJsonPost(String url, Object body, AsyncRESTCallback callback) {
-        asyncJsonPost(url, body, callback, TimeUnit.SECONDS, 300);
+        Long timeout = timeoutMgr.getTimeout(body.getClass());
+        asyncJsonPost(url, body, callback, TimeUnit.MILLISECONDS, timeout == null ? 300000 : timeout);
     }
 
     @Override
     public void asyncJsonPost(String url, String body, AsyncRESTCallback callback) {
         asyncJsonPost(url, body, callback, TimeUnit.SECONDS, 300);
-
     }
 
     @Override
     public HttpEntity<String> httpServletRequestToHttpEntity(HttpServletRequest req) {
         try {
             StringBuilder sb = new StringBuilder();
-            String line = "";
+            String line;
             while ((line = req.getReader().readLine()) != null) {
                 sb.append(line);
             }
@@ -262,9 +395,8 @@ public class RESTFacadeImpl implements RESTFacade {
                 String name = e.nextElement().toString();
                 header.add(name, req.getHeader(name));
             }
-            
-            HttpEntity<String> entity = new HttpEntity<String>(sb.toString(), header);
-            return entity;
+
+            return new HttpEntity<String>(sb.toString(), header);
         } catch (Exception e) {
             logger.warn(e.getMessage(), e);
             throw new CloudRuntimeException(e);
@@ -278,31 +410,59 @@ public class RESTFacadeImpl implements RESTFacade {
 
     @Override
     public <T> T syncJsonPost(String url, Object body, Class<T> returnClass) {
-        String jstr = JSONObjectUtil.toJsonString(body);
-        return syncJsonPost(url, jstr, returnClass);
+        // for unit test finding invocation chain
+        if (body != null) {
+            MessageCommandRecorder.record(body.getClass());
+        }
+
+        return syncJsonPost(url, body == null ? null : JSONObjectUtil.toJsonString(body), returnClass);
     }
 
     @Override
     public <T> T syncJsonPost(String url, String body, Class<T> returnClass) {
+        return syncJsonPost(url, body, null, returnClass);
+    }
+
+    @Override
+    public <T> T syncJsonPost(String url, String body, Map<String, String> headers, Class<T> returnClass) {
+        body = body == null ? "" : body;
+
         HttpHeaders requestHeaders = new HttpHeaders();
+        if (headers != null) {
+            requestHeaders.setAll(headers);
+        }
         requestHeaders.setContentType(MediaType.APPLICATION_JSON);
         requestHeaders.setContentLength(body.length());
         HttpEntity<String> req = new HttpEntity<String>(body, requestHeaders);
-        logger.trace(String.format("json post[%s], %s", url, req.toString()));
-        ResponseEntity<String> rsp = template.exchange(url, HttpMethod.POST, req, String.class);
+        if (logger.isTraceEnabled()) {
+            logger.trace(String.format("json post[%s], %s", url, req.toString()));
+        }
+
+
+        ResponseEntity<String> rsp = new Retry<ResponseEntity<String>>() {
+            @Override
+            @RetryCondition(onExceptions = {IOException.class, RestClientException.class})
+            protected ResponseEntity<String> call() {
+                return template.exchange(url, HttpMethod.POST, req, String.class);
+            }
+        }.run();
+
         if (rsp.getStatusCode() != org.springframework.http.HttpStatus.OK) {
-            String err = String.format("http status: %s, response body:%s", rsp.getStatusCode().toString(), rsp.getBody());
-            throw new RestClientException(err);
+            throw new OperationFailureException(operr("failed to post to %s, status code: %s, response body: %s", url, rsp.getStatusCode(), rsp.getBody()));
         }
         
         if (rsp.getBody() != null && returnClass != Void.class) {
+
+            if (logger.isTraceEnabled()) {
+                logger.trace(String.format("[http response(url: %s)] %s", url, rsp.getBody()));
+            }
+
             return JSONObjectUtil.toObject(rsp.getBody(), returnClass);
         } else {
             return null;
         }
     }
 
-    
     @Override
     public void echo(String url, Completion callback) {
         echo(url, callback, TimeUnit.SECONDS.toMillis(1), TimeUnit.SECONDS.toMillis(30));
@@ -329,8 +489,7 @@ public class RESTFacadeImpl implements RESTFacade {
                     String info = String.format("still unable to echo %s, will try %s times. %s", url, count, e.getMessage());
                     logger.debug(info);
                     if (--count <= 0) {
-                        String err = String.format("unable to echo %s in %sms", url, timeout);
-                        completion.fail(errf.stringToOperationError(err));
+                        completion.fail(operr("unable to echo %s in %sms", url, timeout));
                         return true;
                     } else {
                         return false;
@@ -360,5 +519,56 @@ public class RESTFacadeImpl implements RESTFacade {
     @Override
     public Map<String, HttpCallStatistic> getStatistics() {
         return statistics;
+    }
+
+    @Override
+    public <T> void registerSyncHttpCallHandler(String path, final Class<T> objectType, final SyncHttpCallHandler<T> handler) {
+        HttpCallHandlerWrapper wrapper = httpCallhandlers.get(path);
+        if (wrapper != null) {
+            throw new CloudRuntimeException(String.format("duplicate SyncHttpCallHandler[%s, %s] for the command path[%s]", wrapper.getHandler().getClass(),
+                    handler.getClass(), path));
+        }
+
+        wrapper = new HttpCallHandlerWrapper() {
+            @Override
+            public String handle(HttpEntity<String> entity) {
+                T cmd = JSONObjectUtil.toObject(entity.getBody(), objectType);
+                return handler.handleSyncHttpCall(cmd);
+            }
+
+            @Override
+            public HttpCallHandler getHandler() {
+                return handler;
+            }
+        };
+
+        httpCallhandlers.put(path, wrapper);
+    }
+
+    @Override
+    public String getBaseUrl() {
+        return baseUrl;
+    }
+
+    @Override
+    public String getSendCommandUrl() {
+        return sendCommandUrl;
+    }
+
+    @Override
+    public String getCallbackUrl() {
+        return callbackUrl;
+    }
+
+    @Override
+    public String makeUrl(String path) {
+        UriComponentsBuilder ub = UriComponentsBuilder.fromHttpUrl(baseUrl);
+        ub.path(path);
+        return ub.build().toUriString();
+    }
+
+    @Override
+    public void installBeforeAsyncJsonPostInterceptor(BeforeAsyncJsonPostInterceptor interceptor) {
+        interceptors.add(interceptor);
     }
 }

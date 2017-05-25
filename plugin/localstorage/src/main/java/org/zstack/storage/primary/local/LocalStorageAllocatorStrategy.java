@@ -1,5 +1,8 @@
 package org.zstack.storage.primary.local;
 
+import org.springframework.beans.factory.annotation.Autowire;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Configurable;
 import org.zstack.header.core.workflow.FlowChain;
 import org.zstack.core.workflow.FlowChainBuilder;
 import org.zstack.header.core.workflow.FlowDoneHandler;
@@ -11,6 +14,7 @@ import org.zstack.header.storage.primary.PrimaryStorageAllocatorStrategy;
 import org.zstack.header.storage.primary.PrimaryStorageConstant.AllocatorParams;
 import org.zstack.header.storage.primary.PrimaryStorageInventory;
 import org.zstack.header.storage.primary.PrimaryStorageVO;
+import org.zstack.storage.primary.DiskCapacityTracer;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,8 +26,12 @@ import static org.zstack.utils.CollectionDSL.map;
 /**
  * Created by frank on 7/1/2015.
  */
+@Configurable(preConstruction = true, autowire = Autowire.BY_TYPE)
 public class LocalStorageAllocatorStrategy implements PrimaryStorageAllocatorStrategy {
     private FlowChainBuilder builder;
+
+    @Autowired
+    private DiskCapacityTracer tracker;
 
     public LocalStorageAllocatorStrategy(FlowChainBuilder builder) {
         this.builder = builder;
@@ -45,17 +53,21 @@ public class LocalStorageAllocatorStrategy implements PrimaryStorageAllocatorStr
         FlowChain allocatorChain = builder.build();
         allocatorChain.setName(String.format("allocate-local-primary-storage-msg-%s", spec.getAllocationMessage().getId()));
         allocatorChain.setData(map(e(AllocatorParams.SPEC, spec)));
-        allocatorChain.done(new FlowDoneHandler() {
+        allocatorChain.done(new FlowDoneHandler(null) {
             @Override
             public void handle(Map data) {
                 ret.result = (List<PrimaryStorageVO>) data.get(AllocatorParams.CANDIDATES);
             }
-        }).error(new FlowErrorHandler() {
+        }).error(new FlowErrorHandler(null) {
             @Override
             public void handle(ErrorCode errCode, Map data) {
                 ret.errorCode = errCode;
             }
-        }).start();
+        });
+
+        tracker.trackAllocatorChain(allocatorChain);
+
+        allocatorChain.start();
 
         if (ret.errorCode != null) {
             throw new OperationFailureException(ret.errorCode);

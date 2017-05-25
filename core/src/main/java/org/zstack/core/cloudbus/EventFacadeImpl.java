@@ -1,17 +1,28 @@
 package org.zstack.core.cloudbus;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.zstack.core.Platform;
+import org.zstack.core.db.Q;
 import org.zstack.core.thread.AsyncThread;
+import org.zstack.core.webhook.WebhookCaller;
+import org.zstack.header.core.webhooks.WebhookVO_;
 import org.zstack.header.Component;
-import org.zstack.header.exception.CloudRuntimeException;
+import org.zstack.header.apimediator.ApiMessageInterceptionException;
+import org.zstack.header.apimediator.GlobalApiMessageInterceptor;
+import org.zstack.header.core.webhooks.APICreateWebhookMsg;
+import org.zstack.header.core.webhooks.WebhookInventory;
+import org.zstack.header.core.webhooks.WebhookVO;
+import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.Event;
-import org.zstack.header.message.NeedJsonSchema;
-import org.zstack.utils.TypeUtils;
+import org.zstack.utils.gson.JSONObjectUtil;
+
+import static org.zstack.core.Platform.argerr;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+import static java.util.Arrays.asList;
 
 /**
  * Created with IntelliJ IDEA.
@@ -19,24 +30,53 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Time: 11:39 PM
  * To change this template use File | Settings | File Templates.
  */
-public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Component {
+public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Component, GlobalApiMessageInterceptor {
     @Autowired
     private CloudBus bus;
 
-    private ConcurrentMap<Object, CallbackWrapper> callbacks = new ConcurrentHashMap<Object, CallbackWrapper>();
-    private final List<Object> toRemove = new ArrayList<Object>();
-    private final List<CallbackWrapper> toAdd = new ArrayList<CallbackWrapper>();
+    private final Map<String, CallbackWrapper> global = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, CallbackWrapper> local =  Collections.synchronizedMap(new HashMap<>());
+
     private EventSubscriberReceipt unsubscriber;
+
+    @Override
+    public List<Class> getMessageClassToIntercept() {
+        return asList(APICreateWebhookMsg.class);
+    }
+
+    @Override
+    public InterceptorPosition getPosition() {
+        return InterceptorPosition.FRONT;
+    }
+
+    @Override
+    public APIMessage intercept(APIMessage msg) throws ApiMessageInterceptionException {
+        if (msg instanceof APICreateWebhookMsg) {
+            validate((APICreateWebhookMsg) msg);
+        }
+
+        return msg;
+    }
+
+    private void validate(APICreateWebhookMsg msg) {
+        if (!EventFacade.WEBHOOK_TYPE.equals(msg.getType())) {
+            return;
+        }
+
+        if (msg.getOpaque() == null) {
+            throw new ApiMessageInterceptionException(argerr("for webhooks with type[%s], the field opaque cannot be null", EventFacade.WEBHOOK_TYPE));
+        }
+    }
 
     private class CallbackWrapper {
         String path;
         String glob;
-        Object callback;
+        AbstractEventFacadeCallback callback;
         AtomicBoolean hasRun;
 
-        CallbackWrapper(String path, String glob, Object callback) {
+        CallbackWrapper(String path, AbstractEventFacadeCallback callback) {
             this.path = path;
-            this.glob = glob;
+            this.glob = createRegexFromGlob(path.replaceAll("\\{.*\\}", ".*"));
             this.callback = callback;
             if (callback instanceof AutoOffEventCallback) {
                 hasRun = new AtomicBoolean(false);
@@ -53,25 +93,30 @@ public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Comp
 
         @AsyncThread
         void call(CanonicalEvent e) {
-            if (callback instanceof Runnable) {
-                Runnable r = (Runnable)callback;
-                r.run();
+            if (callback instanceof EventRunnable) {
+                ((EventRunnable) callback).run();
             } else {
                 Map<String, String> tokens = tokenize(e.getPath(), path);
+                tokens.put(EventFacade.META_DATA_MANAGEMENT_NODE_ID, e.getManagementNodeId());
+                tokens.put(EventFacade.META_DATA_PATH, e.getPath());
                 Object data = null;
                 if (e.getContent() != null) {
                     data = e.getContent();
                 }
 
-                if (hasRun != null && !hasRun.compareAndSet(false, true)) {
-                    return;
-                }
-
                 if (callback instanceof EventCallback) {
                     ((EventCallback)callback).run(tokens, data);
                 } else if (callback instanceof AutoOffEventCallback) {
+
+                    if (!hasRun.compareAndSet(false, true)) {
+                        // the callback is being called
+                        return;
+                    }
+
                     if (((AutoOffEventCallback)callback).run(tokens, data)) {
                         off(callback);
+                    } else {
+                        hasRun.set(false);
                     }
                 }
             }
@@ -120,36 +165,40 @@ public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Comp
         return ret;
     }
 
-
     @Override
     public void on(String path, AutoOffEventCallback cb) {
-        synchronized (toAdd) {
-            String glob = createRegexFromGlob(path.replaceAll("\\{.*\\}", ".*"));
-            toAdd.add(new CallbackWrapper(path, glob, cb));
-        }
+        global.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
     }
 
     @Override
     public void on(String path, final EventCallback cb) {
-        synchronized (toAdd) {
-            String glob = createRegexFromGlob(path.replaceAll("\\{.*\\}", ".*"));
-            toAdd.add(new CallbackWrapper(path, glob, cb));
-        }
+        global.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
     }
 
     @Override
-    public void on(String path, Runnable runnable) {
-        synchronized (toAdd) {
-            String glob = createRegexFromGlob(path.replaceAll("\\{.*\\}", ".*"));
-            toAdd.add(new CallbackWrapper(path, glob, runnable));
-        }
+    public void on(String path, EventRunnable cb) {
+        global.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
     }
 
     @Override
-    public void off(Object cb) {
-        synchronized (toRemove) {
-            toRemove.add(cb);
-        }
+    public void off(AbstractEventFacadeCallback cb) {
+        global.remove(cb.uniqueIdentity);
+        local.remove(cb.uniqueIdentity);
+    }
+
+    @Override
+    public void onLocal(String path, AutoOffEventCallback cb) {
+        local.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
+    }
+
+    @Override
+    public void onLocal(String path, EventCallback cb) {
+        local.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
+    }
+
+    @Override
+    public void onLocal(String path, EventRunnable cb) {
+        local.put(cb.uniqueIdentity, new CallbackWrapper(path, cb));
     }
 
     @Override
@@ -157,14 +206,55 @@ public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Comp
         assert path != null;
         CanonicalEvent evt = new CanonicalEvent();
         evt.setPath(path);
+        evt.setManagementNodeId(Platform.getManagementServerId());
         if (data != null) {
+            /*
             if (!TypeUtils.isPrimitiveOrWrapper(data.getClass()) && !data.getClass().isAnnotationPresent(NeedJsonSchema.class)) {
                 throw new CloudRuntimeException(String.format("data[%s] passed to canonical event is not annotated by @NeedJsonSchema", data.getClass().getName()));
             }
+            */
 
             evt.setContent(data);
         }
+        
+        fireLocal(evt);
+
+        callWebhooks(evt);
+        
         bus.publish(evt);
+    }
+
+    private void callWebhooks(CanonicalEvent event) {
+        new WebhookCaller() {
+            @Override
+            public void call() {
+                List<WebhookVO> vos = Q.New(WebhookVO.class).eq(WebhookVO_.type, EventFacade.WEBHOOK_TYPE).list();
+                vos = vos.stream().filter(
+                        vo -> event.getPath().matches(
+                                createRegexFromGlob(vo.getOpaque().replaceAll("\\{.*\\}", ".*"))
+                        )).collect(Collectors.toList());
+
+                if (!vos.isEmpty()) {
+                    postToWebhooks(WebhookInventory.valueOf(vos), JSONObjectUtil.toJsonString(event));
+                }
+            }
+        }.call();
+    }
+
+    private void fireLocal(CanonicalEvent cevt) {
+        Map<String, CallbackWrapper> wrappers = new HashMap<>();
+        wrappers.putAll(local);
+
+        for (CallbackWrapper w : wrappers.values()) {
+            if (cevt.getPath().matches(w.getGlob())) {
+                w.call(cevt);
+            }
+        }
+    }
+
+    @Override
+    public boolean isFromThisManagementNode(Map tokens) {
+        return Platform.getManagementServerId().equals(tokens.get(EventFacade.META_DATA_MANAGEMENT_NODE_ID));
     }
 
     @Override
@@ -173,30 +263,12 @@ public class EventFacadeImpl implements EventFacade, CloudBusEventListener, Comp
             return false;
         }
 
-        synchronized (toAdd) {
-            if (!toAdd.isEmpty()) {
-                for (CallbackWrapper wrapper : toAdd) {
-                    callbacks.put(wrapper.getIdentity(), wrapper);
-                }
-
-                toAdd.clear();
-            }
-        }
-
-        synchronized (toRemove) {
-            if (!toRemove.isEmpty()) {
-                for (Object cb : toRemove) {
-                    callbacks.remove(cb);
-                }
-
-                toRemove.clear();
-            }
-        }
-
         CanonicalEvent cevt = (CanonicalEvent)evt;
-        for (CallbackWrapper wrapper : callbacks.values()) {
-            if (cevt.getPath().matches(wrapper.getGlob())) {
-                wrapper.call(cevt);
+        Map<String, CallbackWrapper> wrappers = new HashMap<>();
+        wrappers.putAll(global);
+        for (CallbackWrapper w : wrappers.values()) {
+            if (cevt.getPath().matches(w.getGlob())) {
+                w.call(cevt);
             }
         }
 

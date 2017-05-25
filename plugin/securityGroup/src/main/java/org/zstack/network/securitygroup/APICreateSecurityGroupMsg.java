@@ -1,8 +1,14 @@
 package org.zstack.network.securitygroup;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APICreateMessage;
+import org.zstack.header.message.APIEvent;
+import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
+
 /**
  * @api
  * create security group
@@ -40,6 +46,12 @@ import org.zstack.header.message.APIParam;
  * see :ref:`APICreateSecurityGroupEvent`
  */
 @Action(category = SecurityGroupConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/security-groups",
+        method = HttpMethod.POST,
+        responseClass = APICreateSecurityGroupEvent.class,
+        parameterName = "params"
+)
 public class APICreateSecurityGroupMsg extends APICreateMessage {
     /**
      * @desc max length of 255 characters
@@ -67,4 +79,26 @@ public class APICreateSecurityGroupMsg extends APICreateMessage {
     public void setDescription(String description) {
         this.description = description;
     }
+ 
+    public static APICreateSecurityGroupMsg __example__() {
+        APICreateSecurityGroupMsg msg = new APICreateSecurityGroupMsg();
+        msg.setName("sp");
+        msg.setDescription("test create security group");
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Created").resource(((APICreateSecurityGroupEvent)evt).getInventory().getUuid(),SecurityGroupVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

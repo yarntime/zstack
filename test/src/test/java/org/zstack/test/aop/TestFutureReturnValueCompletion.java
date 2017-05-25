@@ -5,8 +5,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
-import org.zstack.header.core.Completion;
-import org.zstack.header.core.FutureCompletion;
 import org.zstack.header.core.FutureReturnValueCompletion;
 import org.zstack.header.core.ReturnValueCompletion;
 import org.zstack.test.BeanConstructor;
@@ -33,7 +31,7 @@ public class TestFutureReturnValueCompletion {
 
     @Test
     public void test() throws InterruptedException {
-        FutureReturnValueCompletion completion = new FutureReturnValueCompletion();
+        FutureReturnValueCompletion completion = new FutureReturnValueCompletion(null);
         complete(completion);
         completion.await();
         Assert.assertTrue(completion.isSuccess());

@@ -15,15 +15,13 @@ import org.zstack.header.storage.primary.ImageCacheVO_;
 import org.zstack.header.vm.VmInstanceInventory;
 import org.zstack.kvm.KVMAgentCommands.BootDev;
 import org.zstack.kvm.KVMAgentCommands.StartVmCmd;
-import org.zstack.kvm.KVMConstant;
 import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.simulator.storage.backup.sftp.SftpBackupStorageSimulatorConfig;
-import org.zstack.simulator.storage.primary.nfs.NfsPrimaryStorageSimulatorConfig;
 import org.zstack.test.Api;
+import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.test.deployer.schema.NfsPrimaryStorageConfig;
 import org.zstack.test.storage.backup.sftp.TestSftpBackupStorageDeleteImage2;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
@@ -54,9 +52,9 @@ public class TestCreateVmOnKvmIso {
         kconfig = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test
-	public void test() {
+
+    @Test
+    public void test() throws ApiSenderException {
         ImageInventory iso = deployer.images.get("TestImage");
         SimpleQuery query = dbf.createQuery(ImageCacheVO.class);
         query.add(ImageCacheVO_.imageUuid, Op.EQ, iso.getUuid());
@@ -66,10 +64,12 @@ public class TestCreateVmOnKvmIso {
         StartVmCmd scmd = kconfig.startVmCmd;
         Assert.assertNotNull(scmd);
 
-        Assert.assertEquals(BootDev.cdrom.toString(), scmd.getBootDev());
+        Assert.assertEquals(BootDev.cdrom.toString(), scmd.getBootDev().get(0));
         Assert.assertEquals(isoCache.getInstallUrl(), scmd.getBootIso().getPath());
 
         VmInstanceInventory vm = deployer.vms.get("TestVm");
         Assert.assertEquals("qcow2", vm.getRootVolume().getFormat());
+
+        api.rebootVmInstance(vm.getUuid());
     }
 }

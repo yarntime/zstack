@@ -1,16 +1,28 @@
 package org.zstack.header.image;
 
+import org.springframework.http.HttpMethod;
 import org.zstack.header.identity.Action;
 import org.zstack.header.message.APICreateMessage;
+import org.zstack.header.message.APIEvent;
+import org.zstack.header.message.APIMessage;
 import org.zstack.header.message.APIParam;
+import org.zstack.header.notification.ApiNotification;
+import org.zstack.header.rest.RestRequest;
 import org.zstack.header.storage.backup.BackupStorageVO;
 import org.zstack.header.storage.snapshot.VolumeSnapshotVO;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
  */
 @Action(category = ImageConstant.ACTION_CATEGORY)
+@RestRequest(
+        path = "/images/root-volume-templates/from/volume-snapshots/{snapshotUuid}",
+        responseClass = APICreateRootVolumeTemplateFromVolumeSnapshotEvent.class,
+        method = HttpMethod.POST,
+        parameterName = "params"
+)
 public class APICreateRootVolumeTemplateFromVolumeSnapshotMsg extends APICreateMessage {
     @APIParam(resourceType = VolumeSnapshotVO.class, checkAccount = true, operationTarget = true)
     private String snapshotUuid;
@@ -19,9 +31,9 @@ public class APICreateRootVolumeTemplateFromVolumeSnapshotMsg extends APICreateM
     @APIParam(required = false, maxLength = 2048)
     private String description;
     private String guestOsType;
-    @APIParam(required = false, nonempty = true, resourceType = BackupStorageVO.class)
+    @APIParam(nonempty = true, resourceType = BackupStorageVO.class)
     private List<String> backupStorageUuids;
-    @APIParam(required = false, validValues = {"Linux", "Windows", "Other", "Paravirtualization"})
+    @APIParam(required = false, validValues = {"Linux", "Windows", "Other", "Paravirtualization", "WindowsVirtio"})
     private String platform;
     private boolean system;
 
@@ -80,4 +92,31 @@ public class APICreateRootVolumeTemplateFromVolumeSnapshotMsg extends APICreateM
     public String getSnapshotUuid() {
         return snapshotUuid;
     }
+ 
+    public static APICreateRootVolumeTemplateFromVolumeSnapshotMsg __example__() {
+        APICreateRootVolumeTemplateFromVolumeSnapshotMsg msg = new APICreateRootVolumeTemplateFromVolumeSnapshotMsg();
+
+        msg.setName("My Root Volume Template");
+        msg.setBackupStorageUuids(Collections.singletonList(uuid()));
+        msg.setSnapshotUuid(uuid());
+
+        return msg;
+    }
+
+    public ApiNotification __notification__() {
+        APIMessage that = this;
+
+        return new ApiNotification() {
+            @Override
+            public void after(APIEvent evt) {
+                if (evt.isSuccess()) {
+                    ntfy("Created from a volume snapshot[uuid:%s]", snapshotUuid)
+                            .resource(((APICreateRootVolumeTemplateFromVolumeSnapshotEvent)evt).getInventory().getUuid(),
+                            ImageVO.class.getSimpleName())
+                            .messageAndEvent(that, evt).done();
+                }
+            }
+        };
+    }
+
 }

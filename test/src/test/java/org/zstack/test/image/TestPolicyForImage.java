@@ -5,6 +5,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.db.DatabaseFacade;
+import org.zstack.core.db.SimpleQuery;
 import org.zstack.header.identity.AccountConstant.StatementEffect;
 import org.zstack.header.identity.IdentityErrors;
 import org.zstack.header.identity.PolicyInventory.Statement;
@@ -12,39 +13,37 @@ import org.zstack.header.identity.SessionInventory;
 import org.zstack.header.image.*;
 import org.zstack.header.image.ImageConstant.ImageMediaType;
 import org.zstack.header.query.QueryCondition;
+import org.zstack.header.query.QueryOp;
 import org.zstack.header.simulator.storage.backup.SimulatorBackupStorageDetails;
 import org.zstack.header.storage.backup.BackupStorageInventory;
 import org.zstack.header.storage.backup.BackupStorageVO;
-import org.zstack.test.Api;
-import org.zstack.test.ApiSenderException;
-import org.zstack.test.BeanConstructor;
-import org.zstack.test.DBUtil;
+import org.zstack.test.*;
 import org.zstack.test.identity.IdentityCreator;
 import org.zstack.utils.Utils;
 import org.zstack.utils.data.SizeUnit;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 1. create a user
  * 2. assign permissions of allow of creating/changing/updating/deleting to the user
- *
+ * <p>
  * confirm the user can create/change/update/delete the image
- *
+ * <p>
  * 3. assign permissions of deny of creating/changing/updating/deleting to the user
- *
+ * <p>
  * confirm the user cannot create/change/update/delete the image
- *
+ * <p>
  * 4. create a user added to a group
  * 5. assign permissions of allow of creating/changing/updating/deleting to the group
- *
+ * <p>
  * confirm the user can create/change/update/delete the image
- *
+ * <p>
  * 6. assign permissions of deny of creating/changing/updating/deleting to the group
- *
+ * <p>
  * confirm the user cannot create/change/update/delete the image
- *
  */
 public class TestPolicyForImage {
     CLogger logger = Utils.getLogger(TestPolicyForImage.class);
@@ -55,7 +54,7 @@ public class TestPolicyForImage {
     @Before
     public void setUp() throws Exception {
         DBUtil.reDeployDB();
-        BeanConstructor con = new BeanConstructor();
+        BeanConstructor con = new WebBeanConstructor();
         /* This loads spring application context */
         loader = con.addXml("PortalForUnitTest.xml").addXml("Simulator.xml").addXml("BackupStorageManager.xml")
                 .addXml("ImageManager.xml").addXml("AccountManager.xml").build();
@@ -192,8 +191,28 @@ public class TestPolicyForImage {
         }
         Assert.assertTrue(success);
 
+        // make all image shared to public
+        SimpleQuery<ImageVO> imgq = dbf.createQuery(ImageVO.class);
+        imgq.select(ImageVO_.uuid);
+        List<String> uuids = imgq.listValue();
+
+        api.shareResource(uuids, null, true);
+
         APIQueryImageMsg qmsg = new APIQueryImageMsg();
         qmsg.setConditions(new ArrayList<QueryCondition>());
-        api.query(qmsg, APIQueryImageReply.class, session);
+        APIQueryImageReply r = api.query(qmsg, APIQueryImageReply.class, session);
+        ImageInventory imginv = r.getInventories().get(0);
+        imginv.setName("xxx");
+        imginv.setFormat(null);
+        api.updateImage(imginv);
+
+        // test condition query works with normal account query,
+        // there was a bug caused by AccountSubQueryExtension
+        qmsg = new APIQueryImageMsg();
+        qmsg.addQueryCondition("name", QueryOp.LIKE, "%xx%");
+        r = api.query(qmsg, APIQueryImageReply.class, session);
+        Assert.assertEquals(1, r.getInventories().size());
+        ImageInventory imginv1 = r.getInventories().get(0);
+        Assert.assertEquals(imginv.getUuid(), imginv1.getUuid());
     }
 }

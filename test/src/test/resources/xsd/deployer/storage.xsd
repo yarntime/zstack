@@ -11,6 +11,7 @@
             <xsd:element name="iscsiBtrfsPrimaryStorage" type="IscsiFileSystemPrimaryStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
             <xsd:element name="localPrimaryStorage" type="LocalPrimaryStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
             <xsd:element name="cephPrimaryStorage" type="CephPrimaryStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
+            <xsd:element name="sharedMountPointPrimaryStorage" type="SharedMountPointPrimaryStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
         </xsd:sequence>
     </xsd:complexType>
 
@@ -19,6 +20,7 @@
             <xsd:element name="simulatorBackupStorage" type="SimulatorBackupStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
             <xsd:element name="sftpBackupStorage" type="SftpBackupStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
             <xsd:element name="cephBackupStorage" type="CephBackupStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
+            <xsd:element name="imageStoreBackupStorage" type="ImageStoreBackupStorageConfig" maxOccurs="unbounded" minOccurs="0"/>
         </xsd:sequence>
     </xsd:complexType>
 
@@ -39,6 +41,15 @@
     </xsd:complexType>
 
     <xsd:complexType name="NfsPrimaryStorageConfig">
+        <xsd:complexContent>
+            <xsd:extension base="PrimaryStorageConfigBase">
+                <xsd:attribute name="placeHolder" type="xsd:string"></xsd:attribute>
+                <xsd:attribute name="options" type="xsd:string"></xsd:attribute>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="SharedMountPointPrimaryStorageConfig">
         <xsd:complexContent>
             <xsd:extension base="PrimaryStorageConfigBase">
                 <xsd:attribute name="placeHolder" type="xsd:string"></xsd:attribute>
@@ -99,6 +110,16 @@
         <xsd:attribute name="url" type="xsd:string" use="required"></xsd:attribute>
         <xsd:attribute name="totalCapacity" type="xsd:string" default="1T"></xsd:attribute>
         <xsd:attribute name="availableCapacity" type="xsd:string" default="1T"></xsd:attribute>
+    </xsd:complexType>
+
+    <xsd:complexType name="ImageStoreBackupStorageConfig">
+        <xsd:complexContent>
+            <xsd:extension base="BackupStorageConfigBase">
+                <xsd:attribute name="hostname" type="xsd:string" default="localhost"></xsd:attribute>
+                <xsd:attribute name="username" type="xsd:string" default="root"></xsd:attribute>
+                <xsd:attribute name="password" type="xsd:string" default="password"></xsd:attribute>
+            </xsd:extension>
+        </xsd:complexContent>
     </xsd:complexType>
 
     <xsd:complexType name="SftpBackupStorageConfig">

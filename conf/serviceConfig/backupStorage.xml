@@ -55,4 +55,16 @@
     <message>
         <name>org.zstack.header.storage.backup.APIUpdateBackupStorageMsg</name>
     </message>
+
+    <message>
+        <name>org.zstack.header.storage.backup.APIExportImageFromBackupStorageMsg</name>
+    </message>
+
+    <message>
+        <name>org.zstack.header.storage.backup.APIDeleteExportedImageFromBackupStorageMsg</name>
+    </message>
+
+    <message>
+        <name>org.zstack.header.storage.backup.APIReconnectBackupStorageMsg</name>
+    </message>
 </service>

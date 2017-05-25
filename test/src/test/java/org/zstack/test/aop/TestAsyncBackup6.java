@@ -6,8 +6,8 @@ import org.junit.Test;
 import org.zstack.core.cloudbus.CloudBus;
 import org.zstack.core.componentloader.ComponentLoader;
 import org.zstack.core.thread.AsyncThread;
-import org.zstack.header.core.workflow.FlowErrorHandler;
 import org.zstack.header.core.Completion;
+import org.zstack.header.core.workflow.FlowErrorHandler;
 import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.test.BeanConstructor;
 import org.zstack.utils.Utils;
@@ -43,7 +43,7 @@ public class TestAsyncBackup6 {
 
     @Test
     public void test() throws InterruptedException {
-        testMethod(new Completion() {
+        testMethod(new Completion(null) {
             @Override
             public void success() {
             }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="120">
+<UnitTestSuiteConfig xmlns="http://zstack.org/schema/zstack" timeout="600">
 	<TestCase class="org.zstack.test.compute.host.TestCreateHost"/>
 	<TestCase class="org.zstack.test.compute.host.TestDeleteHost"/>
 	<TestCase class="org.zstack.test.compute.host.TestListHost"/>
@@ -17,4 +17,5 @@
 	<TestCase class="org.zstack.test.compute.host.TestQueryHost"/>
     <TestCase class="org.zstack.test.compute.host.TestGetHypervisorTypes"/>
 	<TestCase class="org.zstack.test.compute.host.TestUpdateHost"/>
+	<TestCase class="org.zstack.test.compute.host.TestReconnectHost"/>
 </UnitTestSuiteConfig>

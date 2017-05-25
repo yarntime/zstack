@@ -16,12 +16,12 @@ import org.zstack.header.network.l3.L3NetworkInventory;
 import org.zstack.kvm.KVMAddons;
 import org.zstack.kvm.KVMAgentCommands;
 import org.zstack.simulator.appliancevm.ApplianceVmSimulatorConfig;
+import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.test.Api;
 import org.zstack.test.ApiSenderException;
 import org.zstack.test.DBUtil;
 import org.zstack.test.WebBeanConstructor;
 import org.zstack.test.deployer.Deployer;
-import org.zstack.simulator.kvm.KVMSimulatorConfig;
 import org.zstack.utils.gson.JSONObjectUtil;
 
 import java.util.concurrent.CountDownLatch;
@@ -93,7 +93,7 @@ public class TestCreateApplianceVmKvm2 {
         nic2.setL3NetworkUuid(l33.getUuid());
         spec.getAdditionalNics().add(nic2);
 
-        apvmf.createApplianceVm(spec, new ReturnValueCompletion<ApplianceVmInventory>() {
+        apvmf.createApplianceVm(spec, new ReturnValueCompletion<ApplianceVmInventory>(null) {
 
             @Override
             public void success(ApplianceVmInventory vm) {

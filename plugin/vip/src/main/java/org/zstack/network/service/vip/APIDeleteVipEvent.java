@@ -1,6 +1,8 @@
 package org.zstack.network.service.vip;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
 /**
  *@apiResult
  * api event for message :ref:`APIDeleteVipMsg`
@@ -18,6 +20,7 @@ import org.zstack.header.message.APIEvent;
 }
  *
  */
+@RestResponse
 public class APIDeleteVipEvent extends APIEvent {
     public APIDeleteVipEvent(String apiId) {
         super(apiId);
@@ -26,4 +29,12 @@ public class APIDeleteVipEvent extends APIEvent {
     public APIDeleteVipEvent() {
         super(null);
     }
+ 
+    public static APIDeleteVipEvent __example__() {
+        APIDeleteVipEvent event = new APIDeleteVipEvent();
+
+
+        return event;
+    }
+
 }

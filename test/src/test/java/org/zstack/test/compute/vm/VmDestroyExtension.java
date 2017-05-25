@@ -13,7 +13,7 @@ public class VmDestroyExtension implements VmInstanceDestroyExtensionPoint {
     boolean afterCalled = false;
     boolean failedCalled = false;
     String expectedUuid;
-    
+
     @Override
     public String preDestroyVm(VmInstanceInventory inv) {
         if (preventDestroy) {
@@ -48,11 +48,6 @@ public class VmDestroyExtension implements VmInstanceDestroyExtensionPoint {
         } else {
             logger.debug(String.format("Expected uuid: %s but got %s", expectedUuid, inv.getUuid()));
         }
-    }
-
-    @Override
-    public void afterDeleteVm(VmInstanceInventory inv) {
-        afterCalled = true;
     }
 
     public boolean isPreventDestroy() {

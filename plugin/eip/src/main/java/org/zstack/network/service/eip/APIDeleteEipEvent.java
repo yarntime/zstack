@@ -1,6 +1,7 @@
 package org.zstack.network.service.eip;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
 
 /**
  *@apiResult
@@ -17,6 +18,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse
 public class APIDeleteEipEvent extends APIEvent {
     public APIDeleteEipEvent(String apiId) {
         super(apiId);
@@ -24,4 +26,12 @@ public class APIDeleteEipEvent extends APIEvent {
 
     public APIDeleteEipEvent() {
     }
+ 
+    public static APIDeleteEipEvent __example__() {
+        APIDeleteEipEvent event = new APIDeleteEipEvent();
+        event.setSuccess(true);
+
+        return event;
+    }
+
 }

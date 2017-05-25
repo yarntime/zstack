@@ -1,6 +1,8 @@
 package org.zstack.network.securitygroup;
 
 import org.zstack.header.message.APIEvent;
+import org.zstack.header.rest.RestResponse;
+
 /**
  *@apiResult
  *
@@ -17,6 +19,7 @@ import org.zstack.header.message.APIEvent;
 }
 }
  */
+@RestResponse
 public class APIDeleteSecurityGroupEvent extends APIEvent {
     public APIDeleteSecurityGroupEvent() {
         super(null);
@@ -25,4 +28,11 @@ public class APIDeleteSecurityGroupEvent extends APIEvent {
     public APIDeleteSecurityGroupEvent(String apiId) {
         super(apiId);
     }
+ 
+    public static APIDeleteSecurityGroupEvent __example__() {
+        APIDeleteSecurityGroupEvent event = new APIDeleteSecurityGroupEvent();
+        event.setSuccess(true);
+        return event;
+    }
+
 }

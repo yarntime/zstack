@@ -5,9 +5,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.zstack.compute.host.HostGlobalConfig;
 import org.zstack.core.CoreGlobalProperty;
 import org.zstack.core.ansible.AnsibleFacade;
-import org.zstack.core.cloudbus.CloudBus;
-import org.zstack.core.cloudbus.CloudBusSteppingCallback;
-import org.zstack.core.cloudbus.ResourceDestinationMaker;
+import org.zstack.core.cloudbus.*;
 import org.zstack.core.componentloader.PluginRegistry;
 import org.zstack.core.config.GlobalConfig;
 import org.zstack.core.config.GlobalConfigException;
@@ -15,19 +13,27 @@ import org.zstack.core.config.GlobalConfigUpdateExtensionPoint;
 import org.zstack.core.config.GlobalConfigValidatorExtensionPoint;
 import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
+import org.zstack.core.notification.N;
 import org.zstack.core.thread.AsyncThread;
+import org.zstack.header.AbstractService;
 import org.zstack.header.Component;
 import org.zstack.header.exception.CloudRuntimeException;
 import org.zstack.header.host.*;
-import org.zstack.header.managementnode.ManagementNodeChangeListener;
+import org.zstack.header.managementnode.ManagementNodeReadyExtensionPoint;
+import org.zstack.header.message.Message;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.message.NeedReplyMessage;
 import org.zstack.header.network.l2.L2NetworkType;
+import org.zstack.header.rest.RESTFacade;
+import org.zstack.header.rest.SyncHttpCallHandler;
 import org.zstack.header.volume.MaxDataVolumeNumberExtensionPoint;
 import org.zstack.header.volume.VolumeConstant;
 import org.zstack.header.volume.VolumeFormat;
+import org.zstack.kvm.KVMAgentCommands.ReconnectMeCmd;
+import org.zstack.utils.CollectionUtils;
 import org.zstack.utils.SizeUtils;
 import org.zstack.utils.Utils;
+import org.zstack.utils.function.Function;
 import org.zstack.utils.logging.CLogger;
 
 import java.util.ArrayList;
@@ -35,14 +41,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class KVMHostFactory implements HypervisorFactory, Component, ManagementNodeChangeListener, MaxDataVolumeNumberExtensionPoint {
+public class KVMHostFactory extends AbstractService implements HypervisorFactory, Component,
+        ManagementNodeReadyExtensionPoint, MaxDataVolumeNumberExtensionPoint {
     private static final CLogger logger = Utils.getLogger(KVMHostFactory.class);
 
     public static final HypervisorType hypervisorType = new HypervisorType(KVMConstant.KVM_HYPERVISOR_TYPE);
     public static final VolumeFormat QCOW2_FORMAT = new VolumeFormat(VolumeConstant.VOLUME_FORMAT_QCOW2, hypervisorType);
     public static final VolumeFormat RAW_FORMAT = new VolumeFormat(VolumeConstant.VOLUME_FORMAT_RAW, hypervisorType);
-    private List<KVMHostConnectExtensionPoint> connectExtensions = new ArrayList<KVMHostConnectExtensionPoint>();
-    private Map<L2NetworkType, KVMCompleteNicInformationExtensionPoint> completeNicInfoExtensions = new HashMap<L2NetworkType, KVMCompleteNicInformationExtensionPoint>();
+    private List<KVMHostConnectExtensionPoint> connectExtensions = new ArrayList<>();
+    private Map<L2NetworkType, KVMCompleteNicInformationExtensionPoint> completeNicInfoExtensions = new HashMap<>();
     private int maxDataVolumeNum;
 
     static {
@@ -60,13 +67,16 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
     private ResourceDestinationMaker destMaker;
     @Autowired
     private CloudBus bus;
+    @Autowired
+    private RESTFacade restf;
 
     @Override
-    public HostVO createHost(HostVO vo, APIAddHostMsg msg) {
+    public HostVO createHost(HostVO vo, AddHostMessage msg) {
         APIAddKVMHostMsg amsg = (APIAddKVMHostMsg) msg;
         KVMHostVO kvo = new KVMHostVO(vo);
         kvo.setUsername(amsg.getUsername());
         kvo.setPassword(amsg.getPassword());
+        kvo.setPort(amsg.getSshPort());
         kvo = dbf.persistAndRefresh(kvo);
         return kvo;
     }
@@ -84,10 +94,10 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
     private List<String> getHostManagedByUs() {
         int qun = 10000;
         long amount = dbf.count(HostVO.class);
-        int times = (int)(amount / qun) + (amount % qun != 0 ? 1 : 0);
+        int times = (int) (amount / qun) + (amount % qun != 0 ? 1 : 0);
         List<String> hostUuids = new ArrayList<String>();
         int start = 0;
-        for (int i=0; i<times; i++) {
+        for (int i = 0; i < times; i++) {
             SimpleQuery<KVMHostVO> q = dbf.createQuery(KVMHostVO.class);
             q.select(HostVO_.uuid);
             // disconnected host will be handled by HostManager
@@ -127,21 +137,21 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
     private void populateExtensions() {
         connectExtensions = pluginRgty.getExtensionList(KVMHostConnectExtensionPoint.class);
         for (KVMCompleteNicInformationExtensionPoint ext : pluginRgty.getExtensionList(KVMCompleteNicInformationExtensionPoint.class)) {
-        	KVMCompleteNicInformationExtensionPoint old = completeNicInfoExtensions.get(ext.getL2NetworkTypeVmNicOn());
+            KVMCompleteNicInformationExtensionPoint old = completeNicInfoExtensions.get(ext.getL2NetworkTypeVmNicOn());
             if (old != null) {
                 throw new CloudRuntimeException(String.format("duplicate KVMCompleteNicInformationExtensionPoint[%s, %s] for type[%s]",
                         old.getClass().getName(), ext.getClass().getName(), ext.getL2NetworkTypeVmNicOn()));
             }
-        	completeNicInfoExtensions.put(ext.getL2NetworkTypeVmNicOn(), ext);
+            completeNicInfoExtensions.put(ext.getL2NetworkTypeVmNicOn(), ext);
         }
     }
 
     public KVMCompleteNicInformationExtensionPoint getCompleteNicInfoExtension(L2NetworkType type) {
-    	KVMCompleteNicInformationExtensionPoint extp = completeNicInfoExtensions.get(type);
-    	if (extp == null) {
-    		throw new IllegalArgumentException(String.format("unble to fine KVMCompleteNicInformationExtensionPoint supporting L2NetworkType[%s]", type));
-    	}
-    	return extp;
+        KVMCompleteNicInformationExtensionPoint extp = completeNicInfoExtensions.get(type);
+        if (extp == null) {
+            throw new IllegalArgumentException(String.format("unble to fine KVMCompleteNicInformationExtensionPoint supporting L2NetworkType[%s]", type));
+        }
+        return extp;
     }
 
 
@@ -169,9 +179,32 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
             @Override
             public void validateGlobalConfig(String category, String name, String oldValue, String value) throws GlobalConfigException {
                 if (!SizeUtils.isSizeString(value)) {
-                    throw new GlobalConfigException(String.format("%s only allows a size string. A size string is a number with suffix 'T/t/G/g/M/m/K/k/B/b' or without suffix, but got %s",
+                    throw new GlobalConfigException(String.format("%s only allows a size string." +
+                                    " A size string is a number with suffix 'T/t/G/g/M/m/K/k/B/b' or without suffix, but got %s",
                             KVMGlobalConfig.RESERVED_MEMORY_CAPACITY.getCanonicalName(), value));
                 }
+            }
+        });
+        KVMGlobalConfig.RESERVED_MEMORY_CAPACITY.installValidateExtension(new GlobalConfigValidatorExtensionPoint() {
+            @Override
+            public void validateGlobalConfig(String category, String name, String oldValue, String value) throws GlobalConfigException {
+                Long valueLong = SizeUtils.sizeStringToBytes(value);
+                Long _1t = SizeUtils.sizeStringToBytes("1T");
+                if (valueLong > _1t || valueLong < 0) {
+                    throw new GlobalConfigException(String.format("Value %s  cannot be greater than the 1TB" + " but got %s",
+                            KVMGlobalConfig.RESERVED_MEMORY_CAPACITY.getCanonicalName(), value));
+                }
+            }
+        });
+        restf.registerSyncHttpCallHandler(KVMConstant.KVM_RECONNECT_ME, ReconnectMeCmd.class, new SyncHttpCallHandler<ReconnectMeCmd>() {
+            @Override
+            public String handleSyncHttpCall(ReconnectMeCmd cmd) {
+                N.New(HostVO.class, cmd.hostUuid).info_("the kvm host[uuid:%s] asks the management server to reconnect it for %s", cmd.hostUuid, cmd.reason);
+                ReconnectHostMsg msg = new ReconnectHostMsg();
+                msg.setHostUuid(cmd.hostUuid);
+                bus.makeTargetServiceIdByResourceUuid(msg, HostConstant.SERVICE_ID, cmd.hostUuid);
+                bus.send(msg);
+                return null;
             }
         });
 
@@ -187,7 +220,7 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
         return connectExtensions;
     }
 
-    KVMHostContext createHostContext(KVMHostVO vo) {
+    public KVMHostContext createHostContext(KVMHostVO vo) {
         UriComponentsBuilder ub = UriComponentsBuilder.newInstance();
         ub.scheme(KVMGlobalProperty.AGENT_URL_SCHEME);
         ub.host(vo.getManagementIp());
@@ -209,20 +242,18 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
     }
 
     @Override
-    public void nodeJoin(String nodeId) {
+    public String getHypervisorTypeForMaxDataVolumeNumberExtension() {
+        return KVMConstant.KVM_HYPERVISOR_TYPE;
     }
 
     @Override
-    public void nodeLeft(String nodeId) {
-    }
-
-    @Override
-    public void iAmDead(String nodeId) {
+    public int getMaxDataVolumeNumber() {
+        return maxDataVolumeNum;
     }
 
     @Override
     @AsyncThread
-    public void iJoin(String nodeId) {
+    public void managementNodeReady() {
         if (CoreGlobalProperty.UNIT_TEST_ON) {
             return;
         }
@@ -250,10 +281,10 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
             msgs.add(msg);
         }
 
-        bus.send(msgs, HostGlobalConfig.HOST_LOAD_PARALLELISM_DEGREE.value(Integer.class), new CloudBusSteppingCallback() {
+        bus.send(msgs, HostGlobalConfig.HOST_LOAD_PARALLELISM_DEGREE.value(Integer.class), new CloudBusSteppingCallback(null) {
             @Override
             public void run(NeedReplyMessage msg, MessageReply reply) {
-                ConnectHostMsg cmsg = (ConnectHostMsg)msg;
+                ConnectHostMsg cmsg = (ConnectHostMsg) msg;
                 if (!reply.isSuccess()) {
                     logger.warn(String.format("failed to connect kvm host[uuid:%s], %s", cmsg.getHostUuid(), reply.getError()));
                 } else {
@@ -264,12 +295,55 @@ public class KVMHostFactory implements HypervisorFactory, Component, ManagementN
     }
 
     @Override
-    public String getHypervisorTypeForMaxDataVolumeNumberExtension() {
-        return KVMConstant.KVM_HYPERVISOR_TYPE;
+    @MessageSafe
+    public void handleMessage(Message msg) {
+        if (msg instanceof APIKvmRunShellMsg) {
+            handle((APIKvmRunShellMsg) msg);
+        } else {
+            bus.dealWithUnknownMessage(msg);
+        }
+    }
+
+    private void handle(final APIKvmRunShellMsg msg) {
+        final APIKvmRunShellEvent evt = new APIKvmRunShellEvent(msg.getId());
+
+        final List<KvmRunShellMsg> kmsgs = CollectionUtils.transformToList(msg.getHostUuids(), new Function<KvmRunShellMsg, String>() {
+            @Override
+            public KvmRunShellMsg call(String arg) {
+                KvmRunShellMsg kmsg = new KvmRunShellMsg();
+                kmsg.setHostUuid(arg);
+                kmsg.setScript(msg.getScript());
+                bus.makeTargetServiceIdByResourceUuid(kmsg, HostConstant.SERVICE_ID, arg);
+                return kmsg;
+            }
+        });
+
+        bus.send(kmsgs, new CloudBusListCallBack(msg) {
+            @Override
+            public void run(List<MessageReply> replies) {
+                for (MessageReply r : replies) {
+                    String hostUuid = kmsgs.get(replies.indexOf(r)).getHostUuid();
+
+                    APIKvmRunShellEvent.ShellResult result = new APIKvmRunShellEvent.ShellResult();
+                    if (!r.isSuccess()) {
+                        result.setErrorCode(r.getError());
+                    } else {
+                        KvmRunShellReply kr = r.castReply();
+                        result.setReturnCode(kr.getReturnCode());
+                        result.setStderr(kr.getStderr());
+                        result.setStdout(kr.getStdout());
+                    }
+
+                    evt.getInventory().put(hostUuid, result);
+                }
+
+                bus.publish(evt);
+            }
+        });
     }
 
     @Override
-    public int getMaxDataVolumeNumber() {
-        return maxDataVolumeNum;
+    public String getId() {
+        return bus.makeLocalServiceId(KVMConstant.SERVICE_ID);
     }
 }

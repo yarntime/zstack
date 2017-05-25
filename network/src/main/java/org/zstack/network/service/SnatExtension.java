@@ -44,7 +44,7 @@ public class SnatExtension extends AbstractNetworkServiceExtension implements Co
         Map.Entry<NetworkServiceSnatBackend, List<SnatStruct>> e = it.next();
         NetworkServiceSnatBackend bkd = e.getKey();
         List<SnatStruct> structs = e.getValue();
-        bkd.applySnatService(structs, spec, new Completion() {
+        bkd.applySnatService(structs, spec, new Completion(complete) {
             @Override
             public void success() {
                 doSnat(it, spec, complete);
@@ -103,7 +103,7 @@ public class SnatExtension extends AbstractNetworkServiceExtension implements Co
 
     private Map<NetworkServiceSnatBackend, List<SnatStruct>> workoutSnat(VmInstanceSpec spec) {
         Map<NetworkServiceSnatBackend, List<SnatStruct>> map = new HashMap<NetworkServiceSnatBackend, List<SnatStruct>>();
-        Map<NetworkServiceProviderType, List<L3NetworkInventory>> providerMap = getNetworkServiceProviderMap(NetworkServiceType.SNAT, spec);
+        Map<NetworkServiceProviderType, List<L3NetworkInventory>> providerMap = getNetworkServiceProviderMap(NetworkServiceType.SNAT, spec.getL3Networks());
 
         for (Map.Entry<NetworkServiceProviderType, List<L3NetworkInventory>> e : providerMap.entrySet()) {
             NetworkServiceProviderType ptype = e.getKey();

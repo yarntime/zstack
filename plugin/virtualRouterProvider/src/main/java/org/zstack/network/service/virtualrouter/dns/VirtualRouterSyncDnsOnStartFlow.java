@@ -9,8 +9,10 @@ import org.zstack.core.db.DatabaseFacade;
 import org.zstack.core.db.SimpleQuery;
 import org.zstack.core.db.SimpleQuery.Op;
 import org.zstack.core.errorcode.ErrorFacade;
+import org.zstack.core.timeout.ApiTimeoutManager;
 import org.zstack.header.core.workflow.FlowTrigger;
 import org.zstack.header.core.workflow.NoRollbackFlow;
+import org.zstack.header.errorcode.ErrorCode;
 import org.zstack.header.message.MessageReply;
 import org.zstack.header.network.l3.L3NetworkDnsVO;
 import org.zstack.header.network.l3.L3NetworkDnsVO_;
@@ -23,6 +25,8 @@ import org.zstack.network.service.virtualrouter.VirtualRouterCommands.SetDnsRsp;
 import org.zstack.utils.Utils;
 import org.zstack.utils.gson.JSONObjectUtil;
 import org.zstack.utils.logging.CLogger;
+
+import static org.zstack.core.Platform.operr;
 
 import java.util.*;
 
@@ -38,6 +42,8 @@ public class VirtualRouterSyncDnsOnStartFlow extends NoRollbackFlow {
 	private DatabaseFacade dbf;
     @Autowired
     private ErrorFacade errf;
+    @Autowired
+    private ApiTimeoutManager apiTimeoutManager;
 
     @Override
     public void run(final FlowTrigger chain, final Map data) {
@@ -73,6 +79,7 @@ public class VirtualRouterSyncDnsOnStartFlow extends NoRollbackFlow {
         for (String d : dnsAddresses) {
             DnsInfo dinfo = new DnsInfo();
             dinfo.setDnsAddress(d);
+            dinfo.setNicMac(vr.getGuestNic().getMac());
             dns.add(dinfo);
         }
 
@@ -83,6 +90,7 @@ public class VirtualRouterSyncDnsOnStartFlow extends NoRollbackFlow {
         msg.setVmInstanceUuid(vr.getUuid());
         msg.setPath(VirtualRouterConstant.VR_SET_DNS_PATH);
         msg.setCommand(cmd);
+        msg.setCommandTimeout(apiTimeoutManager.getTimeout(cmd.getClass(), "30m"));
         bus.makeTargetServiceIdByResourceUuid(msg, VmInstanceConstant.SERVICE_ID, vr.getUuid());
         bus.send(msg, new CloudBusCallBack(chain) {
             @Override
@@ -97,12 +105,9 @@ public class VirtualRouterSyncDnsOnStartFlow extends NoRollbackFlow {
                 if (ret.isSuccess()) {
                     chain.next();
                 } else {
-                    String err = String.format(
-                            "virtual router[name: %s, uuid: %s] failed to configure dns%s, %s ",
-                            vr.getName(), vr.getUuid(),
-                            JSONObjectUtil.toJsonString(dns), ret.getError());
-                    logger.warn(err);
-                    chain.fail(errf.stringToOperationError(err));
+                    ErrorCode err = operr("virtual router[name: %s, uuid: %s] failed to configure dns%s, %s ",
+                            vr.getName(), vr.getUuid(), JSONObjectUtil.toJsonString(dns), ret.getError());
+                    chain.fail(err);
                 }
             }
         });

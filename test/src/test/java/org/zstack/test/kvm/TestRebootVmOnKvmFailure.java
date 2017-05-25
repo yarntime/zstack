@@ -17,6 +17,7 @@ import org.zstack.test.storage.backup.sftp.TestSftpBackupStorageDeleteImage2;
 import org.zstack.utils.Utils;
 import org.zstack.utils.logging.CLogger;
 
+@Deprecated
 public class TestRebootVmOnKvmFailure {
     CLogger logger = Utils.getLogger(TestSftpBackupStorageDeleteImage2.class);
     Deployer deployer;
@@ -41,11 +42,11 @@ public class TestRebootVmOnKvmFailure {
         config = loader.getComponent(KVMSimulatorConfig.class);
         session = api.loginAsAdmin();
     }
-    
-	@Test(expected=ApiSenderException.class)
-	public void test() throws ApiSenderException {
-	    config.rebootVmSuccess = false;
-	    VmInstanceInventory vm = deployer.vms.get("TestVm");
-	    api.rebootVmInstance(vm.getUuid());
-	}
+
+    @Test(expected = ApiSenderException.class)
+    public void test() throws ApiSenderException {
+        config.rebootVmSuccess = false;
+        VmInstanceInventory vm = deployer.vms.get("TestVm");
+        api.rebootVmInstance(vm.getUuid());
+    }
 }
